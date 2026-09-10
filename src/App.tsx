@@ -1,5 +1,15 @@
-import { useEffect, useMemo, useState } from 'react'
-import { utils, writeFileXLSX } from 'xlsx'
+import {
+  useEffect,
+  useMemo,
+  useState,
+} from 'react'
+
+import {
+  read,
+  utils,
+  writeFileXLSX,
+} from 'xlsx'
+
 import { supabase } from './lib/supabase'
 import './App.css'
 
@@ -70,63 +80,369 @@ type CashflowPoint = {
   value: number
 }
 
+type ExcelImportRow = {
+  product_id: string | null
+  name: string
+  supplier: string
+  category: string
+  normal_price: number | null
+  confidential_price: number | null
+  sale_price: number | null
+  availability: number
+  unit_type: string
+  expiration_date: string | null
+
+  currentAvailability: number | null
+  difference: number | null
+  action: 'NUOVO' | 'AGGIORNA'
+}
+
+const EXCEL_HEADERS = [
+  'ID prodotto',
+  'Prodotto',
+  'Fornitore',
+  'Tipologia',
+  'Prezzo normale (€)',
+  'Prezzo confidenziale (€)',
+  'Prezzo SOMS (€)',
+  'Disponibilità',
+  'Unità',
+  'Scadenza',
+]
+
 function App() {
-  const [page, setPage] = useState<Page>('inventory')
+  const [page, setPage] =
+    useState<Page>('inventory')
 
-  const [inventory, setInventory] = useState<InventoryRow[]>([])
-  const [inactiveProducts, setInactiveProducts] = useState<InventoryRow[]>([])
+  const [inventory, setInventory] =
+    useState<InventoryRow[]>([])
 
-  const [selectedProduct, setSelectedProduct] =
-    useState<InventoryRow | null>(null)
+  const [
+    inactiveProducts,
+    setInactiveProducts,
+  ] = useState<InventoryRow[]>([])
 
-  const [cart, setCart] = useState<CartItem[]>([])
-  const [orderItems, setOrderItems] = useState<OrderItem[]>([])
-  const [sales, setSales] = useState<Sale[]>([])
-  const [movements, setMovements] = useState<Movement[]>([])
+  const [
+    selectedProduct,
+    setSelectedProduct,
+  ] =
+    useState<InventoryRow | null>(
+      null
+    )
 
-  const [userEmail, setUserEmail] = useState<string | null>(null)
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
+  const [cart, setCart] =
+    useState<CartItem[]>([])
 
-  const [paymentMethod, setPaymentMethod] = useState('CONTANTI')
+  const [
+    orderItems,
+    setOrderItems,
+  ] =
+    useState<OrderItem[]>([])
 
-  const [loadProductId, setLoadProductId] = useState('')
-  const [loadQuantity, setLoadQuantity] = useState('')
-  const [loadNotes, setLoadNotes] = useState('')
+  const [sales, setSales] =
+    useState<Sale[]>([])
 
-  const [showNewProduct, setShowNewProduct] = useState(false)
+  const [movements, setMovements] =
+    useState<Movement[]>([])
 
-  const [newName, setNewName] = useState('')
-  const [newSupplier, setNewSupplier] = useState('')
-  const [newCategory, setNewCategory] = useState('')
-  const [newNormalPrice, setNewNormalPrice] = useState('')
-  const [newConfidentialPrice, setNewConfidentialPrice] = useState('')
-  const [newSalePrice, setNewSalePrice] = useState('')
-  const [newUnitType, setNewUnitType] = useState('PEZZO')
-  const [newExpirationDate, setNewExpirationDate] = useState('')
+  const [
+    excelImportRows,
+    setExcelImportRows,
+  ] =
+    useState<ExcelImportRow[]>([])
 
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const [
+    excelFileName,
+    setExcelFileName,
+  ] = useState('')
+
+  const [
+    importingExcel,
+    setImportingExcel,
+  ] = useState(false)
+
+  const [
+    userEmail,
+    setUserEmail,
+  ] =
+    useState<string | null>(null)
+
+  const [email, setEmail] =
+    useState('')
+
+  const [password, setPassword] =
+    useState('')
+
+  const [
+    paymentMethod,
+    setPaymentMethod,
+  ] = useState('CONTANTI')
+
+  const [
+    loadProductId,
+    setLoadProductId,
+  ] = useState('')
+
+  const [
+    loadQuantity,
+    setLoadQuantity,
+  ] = useState('')
+
+  const [
+    loadNotes,
+    setLoadNotes,
+  ] = useState('')
+
+  const [
+    showNewProduct,
+    setShowNewProduct,
+  ] = useState(false)
+
+  const [newName, setNewName] =
+    useState('')
+
+  const [
+    newSupplier,
+    setNewSupplier,
+  ] = useState('')
+
+  const [
+    newCategory,
+    setNewCategory,
+  ] = useState('')
+
+  const [
+    newNormalPrice,
+    setNewNormalPrice,
+  ] = useState('')
+
+  const [
+    newConfidentialPrice,
+    setNewConfidentialPrice,
+  ] = useState('')
+
+  const [
+    newSalePrice,
+    setNewSalePrice,
+  ] = useState('')
+
+  const [
+    newUnitType,
+    setNewUnitType,
+  ] = useState('PEZZO')
+
+  const [
+    newExpirationDate,
+    setNewExpirationDate,
+  ] = useState('')
+
+  const [
+    errorMessage,
+    setErrorMessage,
+  ] =
+    useState<string | null>(null)
+
+  const [
+    successMessage,
+    setSuccessMessage,
+  ] =
+    useState<string | null>(null)
 
   function clearMessages() {
     setErrorMessage(null)
     setSuccessMessage(null)
   }
 
-  function parseDecimal(value: string): number | null {
-    const cleaned = value.trim().replace(',', '.')
+  function parseDecimal(
+    value: string
+  ): number | null {
+    const cleaned =
+      value.trim().replace(',', '.')
 
-    if (cleaned === '') return null
+    if (cleaned === '') {
+      return null
+    }
 
-    const number = Number(cleaned)
+    const number =
+      Number(cleaned)
 
-    if (Number.isNaN(number)) return null
+    if (Number.isNaN(number)) {
+      return null
+    }
 
     return number
   }
 
+  function parseExcelNumber(
+    value: unknown,
+    required = false
+  ): number | null {
+    if (
+      value === null ||
+      value === undefined ||
+      value === ''
+    ) {
+      if (required) {
+        throw new Error(
+          'Valore numerico mancante'
+        )
+      }
+
+      return null
+    }
+
+    if (
+      typeof value === 'number'
+    ) {
+      if (
+        Number.isNaN(value)
+      ) {
+        throw new Error(
+          'Numero non valido'
+        )
+      }
+
+      return value
+    }
+
+    const parsed =
+      Number(
+        String(value)
+          .trim()
+          .replace(',', '.')
+      )
+
+    if (
+      Number.isNaN(parsed)
+    ) {
+      throw new Error(
+        `Numero non valido: ${String(
+          value
+        )}`
+      )
+    }
+
+    return parsed
+  }
+
+  function normalizeUnit(
+    value: unknown
+  ) {
+    const normalized =
+      String(value ?? '')
+        .trim()
+        .toUpperCase()
+
+    if (
+      [
+        'PEZZO',
+        'PEZZI',
+        'PZ',
+      ].includes(normalized)
+    ) {
+      return 'PEZZO'
+    }
+
+    if (
+      [
+        'KG',
+        'KILO',
+        'CHILO',
+        'CHILI',
+      ].includes(normalized)
+    ) {
+      return 'KG'
+    }
+
+    if (
+      [
+        'LITRO',
+        'LITRI',
+        'L',
+      ].includes(normalized)
+    ) {
+      return 'LITRO'
+    }
+
+    throw new Error(
+      `Unità non valida: ${String(
+        value
+      )}`
+    )
+  }
+
+  function parseExcelDate(
+    value: unknown
+  ): string | null {
+    if (
+      value === null ||
+      value === undefined ||
+      value === ''
+    ) {
+      return null
+    }
+
+    if (
+      value instanceof Date
+    ) {
+      const year =
+        value.getFullYear()
+
+      const month =
+        String(
+          value.getMonth() + 1
+        ).padStart(2, '0')
+
+      const day =
+        String(
+          value.getDate()
+        ).padStart(2, '0')
+
+      return `${year}-${month}-${day}`
+    }
+
+    const stringValue =
+      String(value).trim()
+
+    if (
+      /^\d{4}-\d{2}-\d{2}$/.test(
+        stringValue
+      )
+    ) {
+      return stringValue
+    }
+
+    const italian =
+      stringValue.match(
+        /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/
+      )
+
+    if (italian) {
+      const day =
+        italian[1].padStart(
+          2,
+          '0'
+        )
+
+      const month =
+        italian[2].padStart(
+          2,
+          '0'
+        )
+
+      return `${italian[3]}-${month}-${day}`
+    }
+
+    throw new Error(
+      `Data non valida: ${stringValue}`
+    )
+  }
+
   async function loadInventory() {
-    const { data: products, error: productsError } = await supabase
+    const {
+      data: products,
+      error: productsError,
+    } = await supabase
       .from('products')
       .select(`
         id,
@@ -143,44 +459,80 @@ function App() {
       .order('name')
 
     if (productsError) {
-      setErrorMessage(productsError.message)
+      setErrorMessage(
+        productsError.message
+      )
       return
     }
 
-    const { data: stocks, error: stocksError } = await supabase
+    const {
+      data: stocks,
+      error: stocksError,
+    } = await supabase
       .from('current_stock')
-      .select('product_id, availability')
+      .select(
+        'product_id, availability'
+      )
 
     if (stocksError) {
-      setErrorMessage(stocksError.message)
+      setErrorMessage(
+        stocksError.message
+      )
       return
     }
 
-    const stockMap = new Map(
-      (stocks ?? []).map((stock) => [
-        stock.product_id,
-        Number(stock.availability),
-      ])
-    )
+    const stockMap =
+      new Map(
+        (stocks ?? []).map(
+          (stock) => [
+            stock.product_id,
+            Number(
+              stock.availability
+            ),
+          ]
+        )
+      )
 
-    const rows: InventoryRow[] = (products ?? []).map((item: any) => ({
-      product_id: item.id,
-      name: item.name,
-      supplier: getProductName(item.suppliers),
-      category: getProductName(item.categories),
-      normal_price: item.normal_price,
-      confidential_price: item.confidential_price,
-      sale_price: item.sale_price,
-      availability: stockMap.get(item.id) ?? 0,
-      unit_type: item.unit_type ?? 'PEZZO',
-      expiration_date: item.expiration_date ?? null,
-    }))
+    const rows: InventoryRow[] =
+      (products ?? []).map(
+        (item: any) => ({
+          product_id: item.id,
+          name: item.name,
+          supplier:
+            getProductName(
+              item.suppliers
+            ),
+          category:
+            getProductName(
+              item.categories
+            ),
+          normal_price:
+            item.normal_price,
+          confidential_price:
+            item.confidential_price,
+          sale_price:
+            item.sale_price,
+          availability:
+            stockMap.get(
+              item.id
+            ) ?? 0,
+          unit_type:
+            item.unit_type ??
+            'PEZZO',
+          expiration_date:
+            item.expiration_date ??
+            null,
+        })
+      )
 
     setInventory(rows)
   }
 
   async function loadInactiveProducts() {
-    const { data: products, error: productsError } = await supabase
+    const {
+      data: products,
+      error: productsError,
+    } = await supabase
       .from('products')
       .select(`
         id,
@@ -197,108 +549,184 @@ function App() {
       .order('name')
 
     if (productsError) {
-      setErrorMessage(productsError.message)
+      setErrorMessage(
+        productsError.message
+      )
       return
     }
 
-    const { data: stocks, error: stocksError } = await supabase
+    const {
+      data: stocks,
+      error: stocksError,
+    } = await supabase
       .from('current_stock')
-      .select('product_id, availability')
+      .select(
+        'product_id, availability'
+      )
 
     if (stocksError) {
-      setErrorMessage(stocksError.message)
+      setErrorMessage(
+        stocksError.message
+      )
       return
     }
 
-    const stockMap = new Map(
-      (stocks ?? []).map((stock) => [
-        stock.product_id,
-        Number(stock.availability),
-      ])
-    )
+    const stockMap =
+      new Map(
+        (stocks ?? []).map(
+          (stock) => [
+            stock.product_id,
+            Number(
+              stock.availability
+            ),
+          ]
+        )
+      )
 
-    const rows: InventoryRow[] = (products ?? []).map((item: any) => ({
-      product_id: item.id,
-      name: item.name,
-      supplier: getProductName(item.suppliers),
-      category: getProductName(item.categories),
-      normal_price: item.normal_price,
-      confidential_price: item.confidential_price,
-      sale_price: item.sale_price,
-      availability: stockMap.get(item.id) ?? 0,
-      unit_type: item.unit_type ?? 'PEZZO',
-      expiration_date: item.expiration_date ?? null,
-    }))
+    const rows: InventoryRow[] =
+      (products ?? []).map(
+        (item: any) => ({
+          product_id: item.id,
+          name: item.name,
+          supplier:
+            getProductName(
+              item.suppliers
+            ),
+          category:
+            getProductName(
+              item.categories
+            ),
+          normal_price:
+            item.normal_price,
+          confidential_price:
+            item.confidential_price,
+          sale_price:
+            item.sale_price,
+          availability:
+            stockMap.get(
+              item.id
+            ) ?? 0,
+          unit_type:
+            item.unit_type ??
+            'PEZZO',
+          expiration_date:
+            item.expiration_date ??
+            null,
+        })
+      )
 
     setInactiveProducts(rows)
   }
 
   async function loadSales() {
-    const { data, error } = await supabase
-      .from('sales')
-      .select(`
-        id,
-        total_amount,
-        payment_method,
-        status,
-        created_at,
-        cancellation_reason,
-        sale_items(
+    const { data, error } =
+      await supabase
+        .from('sales')
+        .select(`
           id,
-          quantity,
-          unit_sale_price,
-          confidential_price_at_sale,
-          line_total,
-          products(name)
+          total_amount,
+          payment_method,
+          status,
+          created_at,
+          cancellation_reason,
+          sale_items(
+            id,
+            quantity,
+            unit_sale_price,
+            confidential_price_at_sale,
+            line_total,
+            products(name)
+          )
+        `)
+        .order(
+          'created_at',
+          {
+            ascending: false,
+          }
         )
-      `)
-      .order('created_at', { ascending: false })
 
     if (error) {
-      setErrorMessage(error.message)
+      setErrorMessage(
+        error.message
+      )
       return
     }
 
-    setSales((data ?? []) as Sale[])
+    setSales(
+      (data ?? []) as Sale[]
+    )
   }
 
   async function loadMovements() {
-    const { data, error } = await supabase
-      .from('stock_movements')
-      .select(`
-        id,
-        movement_type,
-        quantity,
-        stock_before,
-        stock_after,
-        unit_cost,
-        notes,
-        created_at,
-        products(name)
-      `)
-      .order('created_at', { ascending: false })
+    const { data, error } =
+      await supabase
+        .from(
+          'stock_movements'
+        )
+        .select(`
+          id,
+          movement_type,
+          quantity,
+          stock_before,
+          stock_after,
+          unit_cost,
+          notes,
+          created_at,
+          products(name)
+        `)
+        .order(
+          'created_at',
+          {
+            ascending: false,
+          }
+        )
 
     if (error) {
-      setErrorMessage(error.message)
+      setErrorMessage(
+        error.message
+      )
       return
     }
 
-    const normalized: Movement[] = (data ?? []).map((item: any) => ({
-      id: item.id,
-      movement_type: item.movement_type,
-      quantity: Number(item.quantity),
-      stock_before: Number(item.stock_before),
-      stock_after: Number(item.stock_after),
-      unit_cost:
-        item.unit_cost === null
-          ? null
-          : Number(item.unit_cost),
-      notes: item.notes,
-      created_at: item.created_at,
-      products: item.products ?? null,
-    }))
+    const normalized:
+      Movement[] =
+        (data ?? []).map(
+          (item: any) => ({
+            id: item.id,
+            movement_type:
+              item.movement_type,
+            quantity:
+              Number(
+                item.quantity
+              ),
+            stock_before:
+              Number(
+                item.stock_before
+              ),
+            stock_after:
+              Number(
+                item.stock_after
+              ),
+            unit_cost:
+              item.unit_cost ===
+              null
+                ? null
+                : Number(
+                    item.unit_cost
+                  ),
+            notes:
+              item.notes,
+            created_at:
+              item.created_at,
+            products:
+              item.products ??
+              null,
+          })
+        )
 
-    setMovements(normalized)
+    setMovements(
+      normalized
+    )
   }
 
   async function refreshAll() {
@@ -311,13 +739,17 @@ function App() {
   async function login() {
     clearMessages()
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
+    const { error } =
+      await supabase.auth
+        .signInWithPassword({
+          email,
+          password,
+        })
 
     if (error) {
-      setErrorMessage(error.message)
+      setErrorMessage(
+        error.message
+      )
     }
   }
 
@@ -331,137 +763,220 @@ function App() {
   ) {
     clearMessages()
 
-    setInventory((current) =>
-      current.map((item) =>
-        item.product_id === productId
+    setInventory(
+      (current) =>
+        current.map(
+          (item) =>
+            item.product_id ===
+            productId
+              ? {
+                  ...item,
+                  expiration_date:
+                    value ||
+                    null,
+                }
+              : item
+        )
+    )
+
+    setSelectedProduct(
+      (current) =>
+        current?.product_id ===
+        productId
           ? {
-              ...item,
-              expiration_date: value || null,
+              ...current,
+              expiration_date:
+                value || null,
             }
-          : item
-      )
+          : current
     )
 
-    setSelectedProduct((current) =>
-      current?.product_id === productId
-        ? {
-            ...current,
-            expiration_date: value || null,
-          }
-        : current
-    )
-
-    const { error } = await supabase
-      .from('products')
-      .update({
-        expiration_date: value || null,
-      })
-      .eq('id', productId)
+    const { error } =
+      await supabase
+        .from('products')
+        .update({
+          expiration_date:
+            value || null,
+        })
+        .eq(
+          'id',
+          productId
+        )
 
     if (error) {
-      setErrorMessage(error.message)
+      setErrorMessage(
+        error.message
+      )
+
       await loadInventory()
       return
     }
 
-    setSuccessMessage('Data di scadenza aggiornata')
+    setSuccessMessage(
+      'Data di scadenza aggiornata'
+    )
   }
 
-  async function deactivateProduct(product: InventoryRow) {
+  async function deactivateProduct(
+    product: InventoryRow
+  ) {
     clearMessages()
 
-    const confirmed = window.confirm(
-      `Vuoi disattivare "${product.name}"?\n\n` +
-        `Il prodotto non sarà più disponibile nelle operazioni correnti.\n` +
-        `Vendite e movimenti storici resteranno conservati.`
+    const confirmed =
+      window.confirm(
+        `Vuoi disattivare "${product.name}"?\n\n` +
+          `Il prodotto non sarà più disponibile nelle operazioni correnti.\n` +
+          `Vendite e movimenti storici resteranno conservati.`
+      )
+
+    if (!confirmed) {
+      return
+    }
+
+    const { error } =
+      await supabase
+        .from('products')
+        .update({
+          active: false,
+        })
+        .eq(
+          'id',
+          product.product_id
+        )
+
+    if (error) {
+      setErrorMessage(
+        error.message
+      )
+      return
+    }
+
+    setSelectedProduct(
+      null
     )
 
-    if (!confirmed) return
+    await refreshAll()
 
-    const { error } = await supabase
-      .from('products')
-      .update({ active: false })
-      .eq('id', product.product_id)
+    setSuccessMessage(
+      `${product.name} è stato disattivato`
+    )
+  }
+
+  async function reactivateProduct(
+    product: InventoryRow
+  ) {
+    clearMessages()
+
+    const { error } =
+      await supabase
+        .from('products')
+        .update({
+          active: true,
+        })
+        .eq(
+          'id',
+          product.product_id
+        )
 
     if (error) {
-      setErrorMessage(error.message)
+      setErrorMessage(
+        error.message
+      )
       return
     }
-
-    setSelectedProduct(null)
 
     await refreshAll()
 
-    setSuccessMessage(`${product.name} è stato disattivato`)
+    setSuccessMessage(
+      `${product.name} è stato riattivato`
+    )
   }
 
-  async function reactivateProduct(product: InventoryRow) {
+  function addToCart(
+    product: InventoryRow
+  ) {
     clearMessages()
 
-    const { error } = await supabase
-      .from('products')
-      .update({ active: true })
-      .eq('id', product.product_id)
-
-    if (error) {
-      setErrorMessage(error.message)
+    if (
+      product.sale_price ===
+      null
+    ) {
+      setErrorMessage(
+        'Questo prodotto non ha un prezzo di vendita'
+      )
       return
     }
 
-    await refreshAll()
-
-    setSuccessMessage(`${product.name} è stato riattivato`)
-  }
-
-  function addToCart(product: InventoryRow) {
-    clearMessages()
-
-    if (product.sale_price === null) {
-      setErrorMessage('Questo prodotto non ha un prezzo di vendita')
-      return
-    }
-
-    if (product.availability <= 0) {
-      setErrorMessage('Prodotto non disponibile')
+    if (
+      product.availability <=
+      0
+    ) {
+      setErrorMessage(
+        'Prodotto non disponibile'
+      )
       return
     }
 
     setCart((current) => {
-      const existing = current.find(
-        (item) => item.product_id === product.product_id
-      )
+      const existing =
+        current.find(
+          (item) =>
+            item.product_id ===
+            product.product_id
+        )
 
       if (existing) {
-        if (existing.quantity + 1 > product.availability) {
-          setErrorMessage('Quantità superiore alla disponibilità')
+        if (
+          existing.quantity +
+            1 >
+          product.availability
+        ) {
+          setErrorMessage(
+            'Quantità superiore alla disponibilità'
+          )
           return current
         }
 
-        return current.map((item) =>
-          item.product_id === product.product_id
-            ? {
-                ...item,
-                quantity: item.quantity + 1,
-              }
-            : item
+        return current.map(
+          (item) =>
+            item.product_id ===
+            product.product_id
+              ? {
+                  ...item,
+                  quantity:
+                    item.quantity +
+                    1,
+                }
+              : item
         )
       }
 
       return [
         ...current,
         {
-          product_id: product.product_id,
-          name: product.name,
+          product_id:
+            product.product_id,
+          name:
+            product.name,
           quantity: 1,
-          sale_price: Number(product.sale_price),
+          sale_price:
+            Number(
+              product.sale_price
+            ),
         },
       ]
     })
   }
 
-  function removeFromCart(productId: string) {
+  function removeFromCart(
+    productId: string
+  ) {
     setCart((current) =>
-      current.filter((item) => item.product_id !== productId)
+      current.filter(
+        (item) =>
+          item.product_id !==
+          productId
+      )
     )
   }
 
@@ -469,27 +984,44 @@ function App() {
     productId: string,
     quantity: number
   ) {
-    const product = inventory.find(
-      (item) => item.product_id === productId
-    )
+    const product =
+      inventory.find(
+        (item) =>
+          item.product_id ===
+          productId
+      )
 
-    if (!product) return
-
-    if (quantity <= 0) {
-      removeFromCart(productId)
+    if (!product) {
       return
     }
 
-    if (quantity > product.availability) {
-      setErrorMessage('Quantità superiore alla disponibilità')
+    if (quantity <= 0) {
+      removeFromCart(
+        productId
+      )
+      return
+    }
+
+    if (
+      quantity >
+      product.availability
+    ) {
+      setErrorMessage(
+        'Quantità superiore alla disponibilità'
+      )
       return
     }
 
     setCart((current) =>
-      current.map((item) =>
-        item.product_id === productId
-          ? { ...item, quantity }
-          : item
+      current.map(
+        (item) =>
+          item.product_id ===
+          productId
+            ? {
+                ...item,
+                quantity,
+              }
+            : item
       )
     )
   }
@@ -497,59 +1029,100 @@ function App() {
   async function registerSale() {
     clearMessages()
 
-    if (cart.length === 0) {
-      setErrorMessage('Aggiungi almeno un prodotto')
+    if (
+      cart.length === 0
+    ) {
+      setErrorMessage(
+        'Aggiungi almeno un prodotto'
+      )
       return
     }
 
-    const items = cart.map((item) => ({
-      product_id: item.product_id,
-      quantity: item.quantity,
-    }))
+    const items =
+      cart.map(
+        (item) => ({
+          product_id:
+            item.product_id,
+          quantity:
+            item.quantity,
+        })
+      )
 
-    const { error } = await supabase.rpc('register_sale', {
-      p_items: items,
-      p_payment_method: paymentMethod,
-      p_notes: null,
-    })
+    const { error } =
+      await supabase.rpc(
+        'register_sale',
+        {
+          p_items:
+            items,
+          p_payment_method:
+            paymentMethod,
+          p_notes: null,
+        }
+      )
 
     if (error) {
-      setErrorMessage(error.message)
+      setErrorMessage(
+        error.message
+      )
       return
     }
 
     setCart([])
-    setSuccessMessage('Vendita registrata correttamente')
+
+    setSuccessMessage(
+      'Vendita registrata correttamente'
+    )
 
     await refreshAll()
   }
 
-  async function cancelSale(saleId: string) {
+  async function cancelSale(
+    saleId: string
+  ) {
     clearMessages()
 
-    const reason = window.prompt(
-      'Inserisci il motivo dell’annullamento:'
-    )
+    const reason =
+      window.prompt(
+        'Inserisci il motivo dell’annullamento:'
+      )
 
-    if (!reason || reason.trim() === '') return
-
-    const confirmed = window.confirm(
-      'Confermi l’annullamento? La merce verrà restituita al magazzino.'
-    )
-
-    if (!confirmed) return
-
-    const { error } = await supabase.rpc('cancel_sale', {
-      p_sale_id: saleId,
-      p_reason: reason.trim(),
-    })
-
-    if (error) {
-      setErrorMessage(error.message)
+    if (
+      !reason ||
+      reason.trim() === ''
+    ) {
       return
     }
 
-    setSuccessMessage('Vendita annullata correttamente')
+    const confirmed =
+      window.confirm(
+        'Confermi l’annullamento? La merce verrà restituita al magazzino.'
+      )
+
+    if (!confirmed) {
+      return
+    }
+
+    const { error } =
+      await supabase.rpc(
+        'cancel_sale',
+        {
+          p_sale_id:
+            saleId,
+          p_reason:
+            reason.trim(),
+        }
+      )
+
+    if (error) {
+      setErrorMessage(
+        error.message
+      )
+      return
+    }
+
+    setSuccessMessage(
+      'Vendita annullata correttamente'
+    )
 
     await refreshAll()
   }
@@ -557,37 +1130,57 @@ function App() {
   async function registerLoad() {
     clearMessages()
 
-    if (!loadProductId) {
-      setErrorMessage('Seleziona un prodotto')
+    if (
+      !loadProductId
+    ) {
+      setErrorMessage(
+        'Seleziona un prodotto'
+      )
       return
     }
 
-    const quantity = parseDecimal(loadQuantity)
+    const quantity =
+      parseDecimal(
+        loadQuantity
+      )
 
-    if (quantity === null || quantity <= 0) {
+    if (
+      quantity === null ||
+      quantity <= 0
+    ) {
       setErrorMessage(
         'Inserisci una quantità valida maggiore di zero'
       )
       return
     }
 
-    const { error } = await supabase.rpc(
-      'register_stock_load',
-      {
-        p_product_id: loadProductId,
-        p_quantity: quantity,
-        p_notes: loadNotes.trim() || null,
-      }
-    )
+    const { error } =
+      await supabase.rpc(
+        'register_stock_load',
+        {
+          p_product_id:
+            loadProductId,
+          p_quantity:
+            quantity,
+          p_notes:
+            loadNotes.trim() ||
+            null,
+        }
+      )
 
     if (error) {
-      setErrorMessage(error.message)
+      setErrorMessage(
+        error.message
+      )
       return
     }
 
     setLoadQuantity('')
     setLoadNotes('')
-    setSuccessMessage('Carico registrato correttamente')
+
+    setSuccessMessage(
+      'Carico registrato correttamente'
+    )
 
     await refreshAll()
   }
@@ -595,123 +1188,205 @@ function App() {
   async function createNewProduct() {
     clearMessages()
 
-    if (!newName.trim()) {
-      setErrorMessage('Inserisci il nome del prodotto')
+    if (
+      !newName.trim()
+    ) {
+      setErrorMessage(
+        'Inserisci il nome del prodotto'
+      )
       return
     }
 
-    if (!newSupplier.trim()) {
-      setErrorMessage('Inserisci il fornitore')
+    if (
+      !newSupplier.trim()
+    ) {
+      setErrorMessage(
+        'Inserisci il fornitore'
+      )
       return
     }
 
-    if (!newCategory.trim()) {
-      setErrorMessage('Inserisci la categoria')
+    if (
+      !newCategory.trim()
+    ) {
+      setErrorMessage(
+        'Inserisci la categoria'
+      )
       return
     }
 
-    const normalPrice = parseDecimal(newNormalPrice)
+    const normalPrice =
+      parseDecimal(
+        newNormalPrice
+      )
+
     const confidentialPrice =
-      parseDecimal(newConfidentialPrice)
-    const salePrice = parseDecimal(newSalePrice)
+      parseDecimal(
+        newConfidentialPrice
+      )
 
-    let supplierId: string | null = null
+    const salePrice =
+      parseDecimal(
+        newSalePrice
+      )
+
+    let supplierId:
+      string | null =
+        null
 
     const {
-      data: supplierExisting,
-      error: supplierSearchError,
+      data:
+        supplierExisting,
+      error:
+        supplierSearchError,
     } = await supabase
       .from('suppliers')
       .select('id')
-      .eq('name', newSupplier.trim())
+      .eq(
+        'name',
+        newSupplier.trim()
+      )
       .maybeSingle()
 
-    if (supplierSearchError) {
-      setErrorMessage(supplierSearchError.message)
+    if (
+      supplierSearchError
+    ) {
+      setErrorMessage(
+        supplierSearchError.message
+      )
       return
     }
 
-    if (supplierExisting) {
-      supplierId = supplierExisting.id
+    if (
+      supplierExisting
+    ) {
+      supplierId =
+        supplierExisting.id
     } else {
-      const { data: createdSupplier, error } =
-        await supabase
-          .from('suppliers')
-          .insert({
-            name: newSupplier.trim(),
-          })
-          .select('id')
-          .single()
-
-      if (error) {
-        setErrorMessage(error.message)
-        return
-      }
-
-      supplierId = createdSupplier.id
-    }
-
-    let categoryId: string | null = null
-
-    const {
-      data: categoryExisting,
-      error: categorySearchError,
-    } = await supabase
-      .from('categories')
-      .select('id')
-      .eq('name', newCategory.trim())
-      .maybeSingle()
-
-    if (categorySearchError) {
-      setErrorMessage(categorySearchError.message)
-      return
-    }
-
-    if (categoryExisting) {
-      categoryId = categoryExisting.id
-    } else {
-      const { data: createdCategory, error } =
-        await supabase
-          .from('categories')
-          .insert({
-            name: newCategory.trim(),
-          })
-          .select('id')
-          .single()
-
-      if (error) {
-        setErrorMessage(error.message)
-        return
-      }
-
-      categoryId = createdCategory.id
-    }
-
-    const { data: product, error: productError } =
-      await supabase
-        .from('products')
+      const {
+        data:
+          createdSupplier,
+        error,
+      } = await supabase
+        .from('suppliers')
         .insert({
-          name: newName.trim(),
-          supplier_id: supplierId,
-          category_id: categoryId,
-          normal_price: normalPrice,
-          confidential_price: confidentialPrice,
-          sale_price: salePrice,
-          unit_type: newUnitType,
-          expiration_date: newExpirationDate || null,
-          active: true,
+          name:
+            newSupplier.trim(),
         })
         .select('id')
         .single()
 
-    if (productError) {
-      setErrorMessage(productError.message)
+      if (error) {
+        setErrorMessage(
+          error.message
+        )
+        return
+      }
+
+      supplierId =
+        createdSupplier.id
+    }
+
+    let categoryId:
+      string | null =
+        null
+
+    const {
+      data:
+        categoryExisting,
+      error:
+        categorySearchError,
+    } = await supabase
+      .from('categories')
+      .select('id')
+      .eq(
+        'name',
+        newCategory.trim()
+      )
+      .maybeSingle()
+
+    if (
+      categorySearchError
+    ) {
+      setErrorMessage(
+        categorySearchError.message
+      )
+      return
+    }
+
+    if (
+      categoryExisting
+    ) {
+      categoryId =
+        categoryExisting.id
+    } else {
+      const {
+        data:
+          createdCategory,
+        error,
+      } = await supabase
+        .from('categories')
+        .insert({
+          name:
+            newCategory.trim(),
+        })
+        .select('id')
+        .single()
+
+      if (error) {
+        setErrorMessage(
+          error.message
+        )
+        return
+      }
+
+      categoryId =
+        createdCategory.id
+    }
+
+    const {
+      data: product,
+      error:
+        productError,
+    } = await supabase
+      .from('products')
+      .insert({
+        name:
+          newName.trim(),
+        supplier_id:
+          supplierId,
+        category_id:
+          categoryId,
+        normal_price:
+          normalPrice,
+        confidential_price:
+          confidentialPrice,
+        sale_price:
+          salePrice,
+        unit_type:
+          newUnitType,
+        expiration_date:
+          newExpirationDate ||
+          null,
+        active: true,
+      })
+      .select('id')
+      .single()
+
+    if (
+      productError
+    ) {
+      setErrorMessage(
+        productError.message
+      )
       return
     }
 
     await loadInventory()
 
-    setLoadProductId(product.id)
+    setLoadProductId(
+      product.id
+    )
 
     setNewName('')
     setNewSupplier('')
@@ -732,95 +1407,865 @@ function App() {
     productId: string,
     value: string
   ) {
-    setOrderItems((current) => {
-      const existing = current.find(
-        (item) => item.product_id === productId
-      )
+    setOrderItems(
+      (current) => {
+        const existing =
+          current.find(
+            (item) =>
+              item.product_id ===
+              productId
+          )
 
-      if (existing) {
-        return current.map((item) =>
-          item.product_id === productId
-            ? { ...item, quantity: value }
-            : item
-        )
+        if (existing) {
+          return current.map(
+            (item) =>
+              item.product_id ===
+              productId
+                ? {
+                    ...item,
+                    quantity:
+                      value,
+                  }
+                : item
+          )
+        }
+
+        return [
+          ...current,
+          {
+            product_id:
+              productId,
+            quantity: value,
+          },
+        ]
       }
-
-      return [
-        ...current,
-        {
-          product_id: productId,
-          quantity: value,
-        },
-      ]
-    })
+    )
   }
 
-  function getOrderQuantity(productId: string) {
+  function getOrderQuantity(
+    productId: string
+  ) {
     return (
       orderItems.find(
-        (item) => item.product_id === productId
+        (item) =>
+          item.product_id ===
+          productId
       )?.quantity ?? ''
     )
   }
 
-  function getPurchasePrice(product: InventoryRow) {
-    const confidential = Number(
-      product.confidential_price ?? 0
-    )
+  function getPurchasePrice(
+    product: InventoryRow
+  ) {
+    const confidential =
+      Number(
+        product.confidential_price ??
+          0
+      )
 
-    if (confidential > 0) {
+    if (
+      confidential > 0
+    ) {
       return confidential
     }
 
-    return Number(product.normal_price ?? 0)
+    return Number(
+      product.normal_price ??
+        0
+    )
+  }
+
+  function makeDateTimeFileName(
+    prefix: string
+  ) {
+    const now =
+      new Date()
+
+    const date = [
+      now.getFullYear(),
+      String(
+        now.getMonth() + 1
+      ).padStart(2, '0'),
+      String(
+        now.getDate()
+      ).padStart(2, '0'),
+    ].join('-')
+
+    const time = [
+      String(
+        now.getHours()
+      ).padStart(2, '0'),
+      String(
+        now.getMinutes()
+      ).padStart(2, '0'),
+    ].join('-')
+
+    return `${prefix}_${date}_${time}.xlsx`
+  }
+
+  function exportInventoryExcel() {
+    clearMessages()
+
+    if (
+      inventory.length === 0
+    ) {
+      setErrorMessage(
+        'L’inventario è vuoto'
+      )
+      return
+    }
+
+    const rows =
+      inventory.map(
+        (product) => ({
+          Prodotto:
+            product.name,
+          Fornitore:
+            product.supplier ??
+            '',
+          Tipologia:
+            product.category ??
+            '',
+          'Prezzo normale (€)':
+            product.normal_price ??
+            '',
+          'Prezzo confidenziale (€)':
+            product.confidential_price ??
+            '',
+          'Prezzo SOMS (€)':
+            product.sale_price ??
+            '',
+          Disponibilità:
+            product.availability,
+          Unità:
+            formatUnit(
+              product.unit_type
+            ),
+          Scadenza:
+            product.expiration_date
+              ? formatDateOnly(
+                  product.expiration_date
+                )
+              : '',
+          'Giorni residui':
+            getDaysToExpiration(
+              product.expiration_date
+            ) ?? '',
+        })
+      )
+
+    const worksheet =
+      utils.json_to_sheet(
+        rows
+      )
+
+    worksheet['!cols'] = [
+      { wch: 35 },
+      { wch: 28 },
+      { wch: 22 },
+      { wch: 20 },
+      { wch: 24 },
+      { wch: 18 },
+      { wch: 16 },
+      { wch: 12 },
+      { wch: 16 },
+      { wch: 16 },
+    ]
+
+    const workbook =
+      utils.book_new()
+
+    utils.book_append_sheet(
+      workbook,
+      worksheet,
+      'Inventario'
+    )
+
+    const filename =
+      makeDateTimeFileName(
+        'Inventario'
+      )
+
+    writeFileXLSX(
+      workbook,
+      filename,
+      {
+        compression: true,
+      }
+    )
+
+    setSuccessMessage(
+      `File ${filename} generato correttamente`
+    )
+  }
+
+  function downloadExcelTemplate() {
+    clearMessages()
+
+    const rows =
+      inventory.map(
+        (product) => ({
+          'ID prodotto':
+            product.product_id,
+          Prodotto:
+            product.name,
+          Fornitore:
+            product.supplier ??
+            '',
+          Tipologia:
+            product.category ??
+            '',
+          'Prezzo normale (€)':
+            product.normal_price ??
+            '',
+          'Prezzo confidenziale (€)':
+            product.confidential_price ??
+            '',
+          'Prezzo SOMS (€)':
+            product.sale_price ??
+            '',
+          Disponibilità:
+            product.availability,
+          Unità:
+            product.unit_type,
+          Scadenza:
+            product.expiration_date ??
+            '',
+        })
+      )
+
+    /*
+     * Aggiungiamo una riga vuota
+     * per rendere evidente che
+     * è possibile creare nuovi
+     * prodotti lasciando ID vuoto.
+     */
+    rows.push({
+      'ID prodotto': '',
+      Prodotto: '',
+      Fornitore: '',
+      Tipologia: '',
+      'Prezzo normale (€)': '',
+      'Prezzo confidenziale (€)': '',
+      'Prezzo SOMS (€)': '',
+      Disponibilità: '' as any,
+      Unità: '',
+      Scadenza: '',
+    })
+
+    const worksheet =
+      utils.json_to_sheet(
+        rows,
+        {
+          header:
+            EXCEL_HEADERS,
+        }
+      )
+
+    worksheet['!cols'] = [
+      { wch: 38 },
+      { wch: 35 },
+      { wch: 28 },
+      { wch: 22 },
+      { wch: 20 },
+      { wch: 24 },
+      { wch: 18 },
+      { wch: 16 },
+      { wch: 14 },
+      { wch: 16 },
+    ]
+
+    const workbook =
+      utils.book_new()
+
+    utils.book_append_sheet(
+      workbook,
+      worksheet,
+      'Importazione'
+    )
+
+    const filename =
+      makeDateTimeFileName(
+        'Modello_Inventario'
+      )
+
+    writeFileXLSX(
+      workbook,
+      filename,
+      {
+        compression: true,
+      }
+    )
+  }
+
+  async function handleExcelUpload(
+    file: File
+  ) {
+    clearMessages()
+
+    try {
+      const arrayBuffer =
+        await file.arrayBuffer()
+
+      const workbook =
+        read(
+          arrayBuffer,
+          {
+            cellDates: true,
+          }
+        )
+
+      if (
+        workbook.SheetNames
+          .length === 0
+      ) {
+        throw new Error(
+          'Il file Excel non contiene fogli'
+        )
+      }
+
+      const worksheet =
+        workbook.Sheets[
+          workbook.SheetNames[0]
+        ]
+
+      const matrix =
+        utils.sheet_to_json<
+          unknown[]
+        >(
+          worksheet,
+          {
+            header: 1,
+            defval: '',
+            raw: true,
+          }
+        )
+
+      if (
+        matrix.length < 1
+      ) {
+        throw new Error(
+          'Il file Excel è vuoto'
+        )
+      }
+
+      const headers =
+        (matrix[0] ?? [])
+          .map(
+            (value) =>
+              String(
+                value
+              ).trim()
+          )
+
+      const missingHeaders =
+        EXCEL_HEADERS.filter(
+          (header) =>
+            !headers.includes(
+              header
+            )
+        )
+
+      if (
+        missingHeaders.length >
+        0
+      ) {
+        throw new Error(
+          `Formato Excel non valido. Colonne mancanti: ${missingHeaders.join(
+            ', '
+          )}`
+        )
+      }
+
+      const objects =
+        utils.sheet_to_json<
+          Record<
+            string,
+            unknown
+          >
+        >(
+          worksheet,
+          {
+            defval: '',
+            raw: true,
+          }
+        )
+
+      const allProducts = [
+        ...inventory,
+        ...inactiveProducts,
+      ]
+
+      const parsedRows:
+        ExcelImportRow[] =
+          []
+
+      objects.forEach(
+        (
+          row,
+          index
+        ) => {
+          const excelRowNumber =
+            index + 2
+
+          const name =
+            String(
+              row[
+                'Prodotto'
+              ] ?? ''
+            ).trim()
+
+          /*
+           * Riga completamente vuota:
+           * ignorata.
+           */
+          if (
+            name === '' &&
+            String(
+              row[
+                'ID prodotto'
+              ] ?? ''
+            ).trim() === ''
+          ) {
+            return
+          }
+
+          if (
+            name === ''
+          ) {
+            throw new Error(
+              `Riga ${excelRowNumber}: prodotto mancante`
+            )
+          }
+
+          const supplier =
+            String(
+              row[
+                'Fornitore'
+              ] ?? ''
+            ).trim()
+
+          if (
+            supplier === ''
+          ) {
+            throw new Error(
+              `Riga ${excelRowNumber}: fornitore mancante`
+            )
+          }
+
+          const category =
+            String(
+              row[
+                'Tipologia'
+              ] ?? ''
+            ).trim()
+
+          if (
+            category === ''
+          ) {
+            throw new Error(
+              `Riga ${excelRowNumber}: tipologia mancante`
+            )
+          }
+
+          const productIdValue =
+            String(
+              row[
+                'ID prodotto'
+              ] ?? ''
+            ).trim()
+
+          const availability =
+            parseExcelNumber(
+              row[
+                'Disponibilità'
+              ],
+              true
+            )
+
+          if (
+            availability ===
+            null ||
+            availability < 0
+          ) {
+            throw new Error(
+              `Riga ${excelRowNumber}: disponibilità non valida`
+            )
+          }
+
+          const unit =
+            normalizeUnit(
+              row[
+                'Unità'
+              ]
+            )
+
+          const expirationDate =
+            parseExcelDate(
+              row[
+                'Scadenza'
+              ]
+            )
+
+          let existing:
+            InventoryRow |
+            undefined
+
+          if (
+            productIdValue
+          ) {
+            existing =
+              allProducts.find(
+                (product) =>
+                  product.product_id ===
+                  productIdValue
+              )
+
+            if (!existing) {
+              throw new Error(
+                `Riga ${excelRowNumber}: ID prodotto non trovato nel database`
+              )
+            }
+          } else {
+            existing =
+              allProducts.find(
+                (product) =>
+                  product.name
+                    .trim()
+                    .toLowerCase() ===
+                    name.toLowerCase() &&
+                  (
+                    product.supplier ??
+                    ''
+                  )
+                    .trim()
+                    .toLowerCase() ===
+                    supplier.toLowerCase()
+              )
+          }
+
+          const currentAvailability =
+            existing
+              ? existing.availability
+              : null
+
+          const difference =
+            currentAvailability ===
+            null
+              ? availability
+              : availability -
+                currentAvailability
+
+          parsedRows.push({
+            product_id:
+              productIdValue ||
+              null,
+
+            name,
+            supplier,
+            category,
+
+            normal_price:
+              parseExcelNumber(
+                row[
+                  'Prezzo normale (€)'
+                ]
+              ),
+
+            confidential_price:
+              parseExcelNumber(
+                row[
+                  'Prezzo confidenziale (€)'
+                ]
+              ),
+
+            sale_price:
+              parseExcelNumber(
+                row[
+                  'Prezzo SOMS (€)'
+                ]
+              ),
+
+            availability,
+            unit_type:
+              unit,
+
+            expiration_date:
+              expirationDate,
+
+            currentAvailability,
+            difference,
+
+            action:
+              existing
+                ? 'AGGIORNA'
+                : 'NUOVO',
+          })
+        }
+      )
+
+      if (
+        parsedRows.length ===
+        0
+      ) {
+        throw new Error(
+          'Il file non contiene prodotti da importare'
+        )
+      }
+
+      const duplicateIds =
+        parsedRows
+          .filter(
+            (row) =>
+              row.product_id
+          )
+          .map(
+            (row) =>
+              row.product_id
+          )
+          .filter(
+            (
+              id,
+              index,
+              array
+            ) =>
+              array.indexOf(
+                id
+              ) !== index
+          )
+
+      if (
+        duplicateIds.length >
+        0
+      ) {
+        throw new Error(
+          'Il file contiene ID prodotto duplicati'
+        )
+      }
+
+      setExcelImportRows(
+        parsedRows
+      )
+
+      setExcelFileName(
+        file.name
+      )
+
+      setSuccessMessage(
+        'Excel letto correttamente. Controlla l’anteprima prima di confermare.'
+      )
+    } catch (error) {
+      setExcelImportRows(
+        []
+      )
+
+      setExcelFileName('')
+
+      setErrorMessage(
+        error instanceof
+          Error
+          ? error.message
+          : 'Errore durante la lettura del file Excel'
+      )
+    }
+  }
+
+  async function confirmExcelImport() {
+    clearMessages()
+
+    if (
+      excelImportRows.length ===
+      0
+    ) {
+      setErrorMessage(
+        'Non ci sono righe da importare'
+      )
+      return
+    }
+
+    const confirmed =
+      window.confirm(
+        `Confermi l'importazione di ${excelImportRows.length} prodotti?\n\n` +
+          `Le variazioni di disponibilità saranno registrate come movimenti di magazzino.`
+      )
+
+    if (!confirmed) {
+      return
+    }
+
+    setImportingExcel(true)
+
+    const payload =
+      excelImportRows.map(
+        (row) => ({
+          product_id:
+            row.product_id,
+          name:
+            row.name,
+          supplier:
+            row.supplier,
+          category:
+            row.category,
+          normal_price:
+            row.normal_price,
+          confidential_price:
+            row.confidential_price,
+          sale_price:
+            row.sale_price,
+          availability:
+            row.availability,
+          unit_type:
+            row.unit_type,
+          expiration_date:
+            row.expiration_date,
+        })
+      )
+
+    const {
+      data,
+      error,
+    } = await supabase.rpc(
+      'import_inventory_excel',
+      {
+        p_rows:
+          payload,
+      }
+    )
+
+    setImportingExcel(false)
+
+    if (error) {
+      setErrorMessage(
+        error.message
+      )
+      return
+    }
+
+    await refreshAll()
+
+    setExcelImportRows(
+      []
+    )
+
+    setExcelFileName('')
+
+    const result =
+      data as {
+        created?: number
+        updated?: number
+        adjustments?: number
+      } | null
+
+    setSuccessMessage(
+      `Importazione completata: ${
+        result?.created ?? 0
+      } nuovi prodotti, ${
+        result?.updated ?? 0
+      } aggiornati, ${
+        result?.adjustments ??
+        0
+      } rettifiche di magazzino.`
+    )
+  }
+
+  function cancelExcelImport() {
+    setExcelImportRows(
+      []
+    )
+
+    setExcelFileName('')
+
+    clearMessages()
+  }
+
+  function printInventory() {
+    clearMessages()
+    window.print()
   }
 
   function exportOrderExcel() {
     clearMessages()
 
-    const selectedRows = orderItems
-      .map((orderItem) => {
-        const product = inventory.find(
-          (item) =>
-            item.product_id === orderItem.product_id
+    const selectedRows =
+      orderItems
+        .map(
+          (orderItem) => {
+            const product =
+              inventory.find(
+                (item) =>
+                  item.product_id ===
+                  orderItem.product_id
+              )
+
+            if (!product) {
+              return null
+            }
+
+            const quantity =
+              parseDecimal(
+                orderItem.quantity
+              )
+
+            if (
+              quantity ===
+                null ||
+              quantity <= 0
+            ) {
+              return null
+            }
+
+            const unitPrice =
+              getPurchasePrice(
+                product
+              )
+
+            return {
+              Prodotto:
+                product.name,
+              Fornitore:
+                product.supplier ??
+                '-',
+              Quantità:
+                quantity,
+              Unità:
+                formatUnit(
+                  product.unit_type
+                ),
+              'Prezzo unitario (€)':
+                unitPrice,
+              'Spesa prevista (€)':
+                Number(
+                  (
+                    quantity *
+                    unitPrice
+                  ).toFixed(2)
+                ),
+            }
+          }
         )
+        .filter(
+          Boolean
+        ) as any[]
 
-        if (!product) return null
-
-        const quantity =
-          parseDecimal(orderItem.quantity)
-
-        if (quantity === null || quantity <= 0) {
-          return null
-        }
-
-        const unitPrice = getPurchasePrice(product)
-
-        return {
-          Prodotto: product.name,
-          Fornitore: product.supplier ?? '-',
-          Quantità: quantity,
-          Unità: formatUnit(product.unit_type),
-          'Prezzo unitario (€)': unitPrice,
-          'Spesa prevista (€)': Number(
-            (quantity * unitPrice).toFixed(2)
-          ),
-        }
-      })
-      .filter(Boolean) as any[]
-
-    if (selectedRows.length === 0) {
+    if (
+      selectedRows.length ===
+      0
+    ) {
       setErrorMessage(
         'Inserisci almeno una quantità da ordinare'
       )
       return
     }
 
-    const total = selectedRows.reduce(
-      (sum, row) =>
-        sum + row['Spesa prevista (€)'],
-      0
-    )
+    const total =
+      selectedRows.reduce(
+        (sum, row) =>
+          sum +
+          row[
+            'Spesa prevista (€)'
+          ],
+        0
+      )
 
     const excelRows = [
       ...selectedRows,
@@ -829,20 +2274,32 @@ function App() {
         Fornitore: '',
         Quantità: '',
         Unità: '',
-        'Prezzo unitario (€)': '',
-        'Spesa prevista (€)': '',
+        'Prezzo unitario (€)':
+          '',
+        'Spesa prevista (€)':
+          '',
       },
       {
-        Prodotto: 'TOTALE',
+        Prodotto:
+          'TOTALE',
         Fornitore: '',
         Quantità: '',
         Unità: '',
-        'Prezzo unitario (€)': '',
-        'Spesa prevista (€)': Number(total.toFixed(2)),
+        'Prezzo unitario (€)':
+          '',
+        'Spesa prevista (€)':
+          Number(
+            total.toFixed(
+              2
+            )
+          ),
       },
     ]
 
-    const worksheet = utils.json_to_sheet(excelRows)
+    const worksheet =
+      utils.json_to_sheet(
+        excelRows
+      )
 
     worksheet['!cols'] = [
       { wch: 35 },
@@ -853,7 +2310,8 @@ function App() {
       { wch: 20 },
     ]
 
-    const workbook = utils.book_new()
+    const workbook =
+      utils.book_new()
 
     utils.book_append_sheet(
       workbook,
@@ -861,24 +2319,18 @@ function App() {
       'Ordine'
     )
 
-    const now = new Date()
+    const filename =
+      makeDateTimeFileName(
+        'Ordini'
+      )
 
-    const date = [
-      now.getFullYear(),
-      String(now.getMonth() + 1).padStart(2, '0'),
-      String(now.getDate()).padStart(2, '0'),
-    ].join('-')
-
-    const time = [
-      String(now.getHours()).padStart(2, '0'),
-      String(now.getMinutes()).padStart(2, '0'),
-    ].join('-')
-
-    const filename = `Ordini_${date}_${time}.xlsx`
-
-    writeFileXLSX(workbook, filename, {
-      compression: true,
-    })
+    writeFileXLSX(
+      workbook,
+      filename,
+      {
+        compression: true,
+      }
+    )
 
     setSuccessMessage(
       `File ${filename} generato correttamente`
@@ -888,94 +2340,150 @@ function App() {
   const selectedLoadProduct =
     inventory.find(
       (product) =>
-        product.product_id === loadProductId
+        product.product_id ===
+        loadProductId
     )
 
-  const total = useMemo(
-    () =>
-      cart.reduce(
-        (sum, item) =>
-          sum +
-          item.quantity *
-            item.sale_price,
+  const total =
+    useMemo(
+      () =>
+        cart.reduce(
+          (
+            sum,
+            item
+          ) =>
+            sum +
+            item.quantity *
+              item.sale_price,
+          0
+        ),
+      [cart]
+    )
+
+  const orderTotal =
+    useMemo(() => {
+      return orderItems.reduce(
+        (
+          sum,
+          orderItem
+        ) => {
+          const product =
+            inventory.find(
+              (item) =>
+                item.product_id ===
+                orderItem.product_id
+            )
+
+          if (!product) {
+            return sum
+          }
+
+          const quantity =
+            parseDecimal(
+              orderItem.quantity
+            )
+
+          if (
+            quantity ===
+              null ||
+            quantity <= 0
+          ) {
+            return sum
+          }
+
+          return (
+            sum +
+            quantity *
+              getPurchasePrice(
+                product
+              )
+          )
+        },
         0
-      ),
-    [cart]
-  )
+      )
+    }, [
+      orderItems,
+      inventory,
+    ])
 
-  const orderTotal = useMemo(() => {
-    return orderItems.reduce(
-      (sum, orderItem) => {
-        const product = inventory.find(
-          (item) =>
-            item.product_id ===
-            orderItem.product_id
-        )
+  const categoryCount =
+    useMemo(() => {
+      return new Set(
+        inventory
+          .map(
+            (item) =>
+              item.category
+          )
+          .filter(Boolean)
+      ).size
+    }, [inventory])
 
-        if (!product) return sum
-
-        const quantity =
-          parseDecimal(orderItem.quantity)
-
-        if (
-          quantity === null ||
-          quantity <= 0
-        ) {
-          return sum
-        }
-
-        return (
+  const tiedCapital =
+    useMemo(() => {
+      return [
+        ...inventory,
+        ...inactiveProducts,
+      ].reduce(
+        (
+          sum,
+          product
+        ) =>
           sum +
-          quantity *
-            getPurchasePrice(product)
-        )
-      },
-      0
-    )
-  }, [orderItems, inventory])
+          product.availability *
+            getPurchasePrice(
+              product
+            ),
+        0
+      )
+    }, [
+      inventory,
+      inactiveProducts,
+    ])
 
-  const categoryCount = useMemo(() => {
-    return new Set(
-      inventory
-        .map((item) => item.category)
-        .filter(Boolean)
-    ).size
-  }, [inventory])
-
-  const tiedCapital = useMemo(() => {
-    return inventory.reduce(
-      (sum, product) =>
-        sum +
-        product.availability *
-          getPurchasePrice(product),
-      0
-    )
-  }, [inventory])
-
-  const inventorySaleValue = useMemo(() => {
-    return inventory.reduce(
-      (sum, product) =>
-        sum +
-        product.availability *
-          Number(product.sale_price ?? 0),
-      0
-    )
-  }, [inventory])
+  const inventorySaleValue =
+    useMemo(() => {
+      return [
+        ...inventory,
+        ...inactiveProducts,
+      ].reduce(
+        (
+          sum,
+          product
+        ) =>
+          sum +
+          product.availability *
+            Number(
+              product.sale_price ??
+                0
+            ),
+        0
+      )
+    }, [
+      inventory,
+      inactiveProducts,
+    ])
 
   const potentialMargin =
-    inventorySaleValue - tiedCapital
+    inventorySaleValue -
+    tiedCapital
 
   const completedSalesRevenue =
     useMemo(() => {
       return sales
         .filter(
           (sale) =>
-            sale.status === 'COMPLETATA'
+            sale.status ===
+            'COMPLETATA'
         )
         .reduce(
-          (sum, sale) =>
+          (
+            sum,
+            sale
+          ) =>
             sum +
-            Number(sale.total_amount),
+            Number(
+              sale.total_amount
+            ),
           0
         )
     }, [sales])
@@ -983,20 +2491,25 @@ function App() {
   const purchaseOutflow =
     useMemo(() => {
       return movements
-        .filter((movement) =>
-          [
-            'INVENTARIO_INIZIALE',
-            'CARICO',
-          ].includes(
-            movement.movement_type
-          )
+        .filter(
+          (movement) =>
+            [
+              'INVENTARIO_INIZIALE',
+              'CARICO',
+            ].includes(
+              movement.movement_type
+            )
         )
         .reduce(
-          (sum, movement) =>
+          (
+            sum,
+            movement
+          ) =>
             sum +
             movement.quantity *
               Number(
-                movement.unit_cost ?? 0
+                movement.unit_cost ??
+                  0
               ),
           0
         )
@@ -1014,78 +2527,130 @@ function App() {
       }[] = []
 
       movements
-        .filter((movement) =>
-          [
-            'INVENTARIO_INIZIALE',
-            'CARICO',
-          ].includes(
-            movement.movement_type
-          )
+        .filter(
+          (movement) =>
+            [
+              'INVENTARIO_INIZIALE',
+              'CARICO',
+            ].includes(
+              movement.movement_type
+            )
         )
-        .forEach((movement) => {
-          events.push({
-            date: movement.created_at,
-            amount:
-              -movement.quantity *
-              Number(
-                movement.unit_cost ?? 0
-              ),
-          })
-        })
+        .forEach(
+          (movement) => {
+            events.push({
+              date:
+                movement.created_at,
+              amount:
+                -movement.quantity *
+                Number(
+                  movement.unit_cost ??
+                    0
+                ),
+            })
+          }
+        )
 
       sales
         .filter(
           (sale) =>
-            sale.status === 'COMPLETATA'
+            sale.status ===
+            'COMPLETATA'
         )
-        .forEach((sale) => {
-          events.push({
-            date: sale.created_at,
-            amount: Number(
-              sale.total_amount
-            ),
-          })
-        })
+        .forEach(
+          (sale) => {
+            events.push({
+              date:
+                sale.created_at,
+              amount:
+                Number(
+                  sale.total_amount
+                ),
+            })
+          }
+        )
 
       events.sort(
         (a, b) =>
-          new Date(a.date).getTime() -
-          new Date(b.date).getTime()
+          new Date(
+            a.date
+          ).getTime() -
+          new Date(
+            b.date
+          ).getTime()
       )
 
       let cumulative = 0
 
-      return events.map((event) => {
-        cumulative += event.amount
+      return events.map(
+        (event) => {
+          cumulative +=
+            event.amount
 
-        return {
-          date: event.date,
-          value: cumulative,
+          return {
+            date:
+              event.date,
+            value:
+              cumulative,
+          }
         }
-      })
-    }, [movements, sales])
+      )
+    }, [
+      movements,
+      sales,
+    ])
+
+  const excelNewCount =
+    excelImportRows.filter(
+      (row) =>
+        row.action ===
+        'NUOVO'
+    ).length
+
+  const excelUpdateCount =
+    excelImportRows.filter(
+      (row) =>
+        row.action ===
+        'AGGIORNA'
+    ).length
+
+  const excelAdjustmentCount =
+    excelImportRows.filter(
+      (row) =>
+        row.difference !==
+          null &&
+        row.difference !==
+          0
+    ).length
 
   useEffect(() => {
     supabase.auth
       .getSession()
       .then(({ data }) => {
         setUserEmail(
-          data.session?.user.email ??
-            null
+          data.session?.user
+            .email ?? null
         )
       })
 
     const { data } =
-      supabase.auth.onAuthStateChange(
-        (_event, session) => {
-          setUserEmail(
-            session?.user.email ?? null
-          )
-        }
-      )
+      supabase.auth
+        .onAuthStateChange(
+          (
+            _event,
+            session
+          ) => {
+            setUserEmail(
+              session?.user
+                .email ??
+                null
+            )
+          }
+        )
 
     return () => {
-      data.subscription.unsubscribe()
+      data.subscription
+        .unsubscribe()
     }
   }, [])
 
@@ -1094,7 +2659,9 @@ function App() {
       refreshAll()
     } else {
       setInventory([])
-      setInactiveProducts([])
+      setInactiveProducts(
+        []
+      )
       setSales([])
       setMovements([])
       setCart([])
@@ -1112,11 +2679,13 @@ function App() {
           />
 
           <h1>
-            Gramsci Warehouse Management
+            Gramsci Warehouse
+            Management
           </h1>
 
           <p>
-            Accedi per gestire il magazzino.
+            Accedi per gestire
+            il magazzino.
           </p>
 
           <input
@@ -1125,7 +2694,9 @@ function App() {
             placeholder="Email"
             value={email}
             onChange={(e) =>
-              setEmail(e.target.value)
+              setEmail(
+                e.target.value
+              )
             }
           />
 
@@ -1135,7 +2706,9 @@ function App() {
             placeholder="Password"
             value={password}
             onChange={(e) =>
-              setPassword(e.target.value)
+              setPassword(
+                e.target.value
+              )
             }
           />
 
@@ -1158,7 +2731,7 @@ function App() {
 
   return (
     <div className="app">
-      <header className="app-header">
+      <header className="app-header no-print">
         <div className="header-logo">
           <img
             src="/logo.png"
@@ -1169,7 +2742,8 @@ function App() {
 
         <div className="header-title">
           <h1>
-            Gramsci Warehouse Management
+            Gramsci Warehouse
+            Management
           </h1>
 
           <span>
@@ -1178,7 +2752,9 @@ function App() {
         </div>
 
         <div className="user-area">
-          <span>{userEmail}</span>
+          <span>
+            {userEmail}
+          </span>
 
           <button
             className="btn btn-secondary"
@@ -1189,18 +2765,25 @@ function App() {
         </div>
       </header>
 
-      <nav className="app-nav">
+      <nav className="app-nav no-print">
         <NavButton
           label="Inventario"
-          active={page === 'inventory'}
+          active={
+            page ===
+            'inventory'
+          }
           onClick={() =>
-            setPage('inventory')
+            setPage(
+              'inventory'
+            )
           }
         />
 
         <NavButton
           label="Vendite"
-          active={page === 'sales'}
+          active={
+            page === 'sales'
+          }
           onClick={() =>
             setPage('sales')
           }
@@ -1208,7 +2791,9 @@ function App() {
 
         <NavButton
           label="Carico merce"
-          active={page === 'load'}
+          active={
+            page === 'load'
+          }
           onClick={() =>
             setPage('load')
           }
@@ -1216,7 +2801,9 @@ function App() {
 
         <NavButton
           label="Ordina"
-          active={page === 'order'}
+          active={
+            page === 'order'
+          }
           onClick={() =>
             setPage('order')
           }
@@ -1224,16 +2811,22 @@ function App() {
 
         <NavButton
           label="Statistiche"
-          active={page === 'statistics'}
+          active={
+            page ===
+            'statistics'
+          }
           onClick={() =>
-            setPage('statistics')
+            setPage(
+              'statistics'
+            )
           }
         />
 
         <NavButton
           label="Storico vendite"
           active={
-            page === 'salesHistory'
+            page ===
+            'salesHistory'
           }
           onClick={() =>
             setPage(
@@ -1244,68 +2837,384 @@ function App() {
 
         <NavButton
           label="Movimenti"
-          active={page === 'movements'}
+          active={
+            page ===
+            'movements'
+          }
           onClick={() =>
-            setPage('movements')
+            setPage(
+              'movements'
+            )
           }
         />
 
         <NavButton
           label="Prodotti disattivati"
-          active={page === 'inactive'}
+          active={
+            page ===
+            'inactive'
+          }
           onClick={() =>
-            setPage('inactive')
+            setPage(
+              'inactive'
+            )
           }
         />
       </nav>
 
       <main className="main-content">
+
         {page === 'inventory' && (
-          <>
-            <PageTitle
-              title="Inventario"
-              subtitle="Situazione attuale del magazzino"
-            />
+          <div className="inventory-print-area">
 
-            <div className="summary-grid">
-              <SummaryCard
-                label="Prodotti"
-                value={inventory.length}
-              />
+            <div className="print-only print-inventory-header">
+              <h1>
+                Gramsci Warehouse
+                Management
+              </h1>
 
-              <SummaryCard
-                label="Tipologie"
-                value={categoryCount}
-              />
+              <h2>
+                Inventario
+              </h2>
 
-              <SummaryCard
-                label="Prodotti esauriti"
-                value={
-                  inventory.filter(
-                    (item) =>
-                      item.availability <= 0
-                  ).length
-                }
-              />
+              <p>
+                Stampato il{' '}
+                {new Date().toLocaleString(
+                  'it-IT'
+                )}
+              </p>
             </div>
 
-            <div className="panel">
+            <div className="no-print">
+              <PageTitle
+                title="Inventario"
+                subtitle="Situazione attuale del magazzino"
+              />
+
+              <div className="inventory-actions">
+
+                <button
+                  className="btn btn-primary"
+                  onClick={
+                    exportInventoryExcel
+                  }
+                >
+                  Esporta Excel
+                </button>
+
+                <button
+                  className="btn btn-secondary"
+                  onClick={
+                    printInventory
+                  }
+                >
+                  Stampa inventario
+                </button>
+
+                <button
+                  className="btn btn-secondary"
+                  onClick={
+                    downloadExcelTemplate
+                  }
+                >
+                  Scarica modello Excel
+                </button>
+
+                <label className="btn btn-upload">
+                  Carica Excel
+
+                  <input
+                    className="hidden-file-input"
+                    type="file"
+                    accept=".xlsx,.xls"
+                    onChange={async (
+                      e
+                    ) => {
+                      const file =
+                        e.target
+                          .files?.[0]
+
+                      if (file) {
+                        await handleExcelUpload(
+                          file
+                        )
+                      }
+
+                      e.currentTarget.value =
+                        ''
+                    }}
+                  />
+                </label>
+
+              </div>
+
+              <div className="summary-grid">
+                <SummaryCard
+                  label="Prodotti"
+                  value={
+                    inventory.length
+                  }
+                />
+
+                <SummaryCard
+                  label="Tipologie"
+                  value={
+                    categoryCount
+                  }
+                />
+
+                <SummaryCard
+                  label="Prodotti esauriti"
+                  value={
+                    inventory.filter(
+                      (item) =>
+                        item.availability <=
+                        0
+                    ).length
+                  }
+                />
+              </div>
+
+              {excelImportRows.length >
+                0 && (
+                <div className="excel-import-panel">
+
+                  <div className="excel-import-header">
+                    <div>
+                      <span className="modal-eyebrow">
+                        Anteprima
+                        importazione
+                      </span>
+
+                      <h3>
+                        {excelFileName}
+                      </h3>
+                    </div>
+
+                    <span className="badge badge-warning">
+                      Nessuna modifica
+                      ancora applicata
+                    </span>
+                  </div>
+
+                  <div className="import-summary-grid">
+                    <SummaryCard
+                      label="Righe valide"
+                      value={
+                        excelImportRows.length
+                      }
+                    />
+
+                    <SummaryCard
+                      label="Nuovi prodotti"
+                      value={
+                        excelNewCount
+                      }
+                    />
+
+                    <SummaryCard
+                      label="Prodotti aggiornati"
+                      value={
+                        excelUpdateCount
+                      }
+                    />
+
+                    <SummaryCard
+                      label="Rettifiche giacenza"
+                      value={
+                        excelAdjustmentCount
+                      }
+                    />
+                  </div>
+
+                  <div className="table-wrapper import-preview-table">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>
+                            Azione
+                          </th>
+                          <th>
+                            Prodotto
+                          </th>
+                          <th>
+                            Fornitore
+                          </th>
+                          <th>
+                            Tipologia
+                          </th>
+                          <th>
+                            Attuale
+                          </th>
+                          <th>
+                            Excel
+                          </th>
+                          <th>
+                            Differenza
+                          </th>
+                          <th>
+                            Unità
+                          </th>
+                          <th>
+                            Scadenza
+                          </th>
+                        </tr>
+                      </thead>
+
+                      <tbody>
+                        {excelImportRows.map(
+                          (
+                            row,
+                            index
+                          ) => (
+                            <tr
+                              key={`${row.product_id ?? row.name}-${index}`}
+                            >
+                              <td>
+                                <span
+                                  className={
+                                    row.action ===
+                                    'NUOVO'
+                                      ? 'badge badge-warning'
+                                      : 'badge badge-neutral'
+                                  }
+                                >
+                                  {
+                                    row.action
+                                  }
+                                </span>
+                              </td>
+
+                              <td>
+                                <strong>
+                                  {
+                                    row.name
+                                  }
+                                </strong>
+                              </td>
+
+                              <td>
+                                {
+                                  row.supplier
+                                }
+                              </td>
+
+                              <td>
+                                {
+                                  row.category
+                                }
+                              </td>
+
+                              <td>
+                                {row.currentAvailability ===
+                                null
+                                  ? '-'
+                                  : formatQuantity(
+                                      row.currentAvailability,
+                                      row.unit_type
+                                    )}
+                              </td>
+
+                              <td>
+                                {formatQuantity(
+                                  row.availability,
+                                  row.unit_type
+                                )}
+                              </td>
+
+                              <td>
+                                <DifferenceBadge
+                                  difference={
+                                    row.difference
+                                  }
+                                  unit={
+                                    row.unit_type
+                                  }
+                                />
+                              </td>
+
+                              <td>
+                                {formatUnit(
+                                  row.unit_type
+                                )}
+                              </td>
+
+                              <td>
+                                {row.expiration_date
+                                  ? formatDateOnly(
+                                      row.expiration_date
+                                    )
+                                  : '-'}
+                              </td>
+                            </tr>
+                          )
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="import-actions">
+                    <button
+                      className="btn btn-secondary"
+                      onClick={
+                        cancelExcelImport
+                      }
+                      disabled={
+                        importingExcel
+                      }
+                    >
+                      Annulla
+                    </button>
+
+                    <button
+                      className="btn btn-primary btn-large"
+                      onClick={
+                        confirmExcelImport
+                      }
+                      disabled={
+                        importingExcel
+                      }
+                    >
+                      {importingExcel
+                        ? 'Importazione...'
+                        : 'Conferma aggiornamento'}
+                    </button>
+                  </div>
+
+                </div>
+              )}
+
+            </div>
+
+            <div className="panel inventory-panel">
               <div className="table-wrapper">
-                <table>
+                <table className="inventory-table">
                   <thead>
                     <tr>
-                      <th>Prodotto</th>
-                      <th>Fornitore</th>
-                      <th>Tipo</th>
-                      <th>Prezzo</th>
+                      <th>
+                        Prodotto
+                      </th>
+                      <th>
+                        Fornitore
+                      </th>
+                      <th>
+                        Tipo
+                      </th>
+                      <th>
+                        Prezzo
+                      </th>
                       <th>
                         P. confidenziale
                       </th>
-                      <th>P. SOMS</th>
+                      <th>
+                        P. SOMS
+                      </th>
                       <th>
                         Disponibilità
                       </th>
-                      <th>Scadenza</th>
+                      <th>
+                        Scadenza
+                      </th>
                       <th>
                         Giorni residui
                       </th>
@@ -1329,15 +3238,23 @@ function App() {
                             <td>
                               <button
                                 type="button"
-                                className="product-name-button"
+                                className="product-name-button no-print"
                                 onClick={() =>
                                   setSelectedProduct(
                                     item
                                   )
                                 }
                               >
-                                {item.name}
+                                {
+                                  item.name
+                                }
                               </button>
+
+                              <span className="print-only">
+                                {
+                                  item.name
+                                }
+                              </span>
                             </td>
 
                             <td>
@@ -1371,9 +3288,11 @@ function App() {
                             <td>
                               <span
                                 className={
-                                  item.availability <= 0
+                                  item.availability <=
+                                  0
                                     ? 'badge badge-danger'
-                                    : item.availability <= 5
+                                    : item.availability <=
+                                      5
                                     ? 'badge badge-warning'
                                     : 'badge badge-success'
                                 }
@@ -1387,24 +3306,37 @@ function App() {
 
                             <td>
                               <input
-                                className="date-input"
+                                className="date-input no-print"
                                 type="date"
                                 value={
                                   item.expiration_date ??
                                   ''
                                 }
-                                onChange={(e) =>
+                                onChange={(
+                                  e
+                                ) =>
                                   updateExpirationDate(
                                     item.product_id,
-                                    e.target.value
+                                    e.target
+                                      .value
                                   )
                                 }
                               />
+
+                              <span className="print-only">
+                                {item.expiration_date
+                                  ? formatDateOnly(
+                                      item.expiration_date
+                                    )
+                                  : '-'}
+                              </span>
                             </td>
 
                             <td>
                               <ExpirationBadge
-                                days={days}
+                                days={
+                                  days
+                                }
                               />
                             </td>
                           </tr>
@@ -1415,7 +3347,8 @@ function App() {
                 </table>
               </div>
             </div>
-          </>
+
+          </div>
         )}
 
         {page === 'sales' && (
@@ -1426,8 +3359,11 @@ function App() {
             />
 
             <div className="two-column-layout">
+
               <div className="panel">
-                <h3>Prodotti</h3>
+                <h3>
+                  Prodotti
+                </h3>
 
                 <div className="product-list">
                   {inventory.map(
@@ -1474,82 +3410,100 @@ function App() {
               </div>
 
               <div className="panel sticky-panel">
-                <h3>Carrello</h3>
+                <h3>
+                  Carrello
+                </h3>
 
-                {cart.length === 0 && (
+                {cart.length ===
+                  0 && (
                   <div className="empty-state">
-                    Nessun prodotto nel carrello.
+                    Nessun prodotto
+                    nel carrello.
                   </div>
                 )}
 
-                {cart.map((item) => (
-                  <div
-                    className="cart-row"
-                    key={
-                      item.product_id
-                    }
-                  >
-                    <div>
-                      <strong>
-                        {item.name}
-                      </strong>
+                {cart.map(
+                  (item) => (
+                    <div
+                      className="cart-row"
+                      key={
+                        item.product_id
+                      }
+                    >
+                      <div>
+                        <strong>
+                          {
+                            item.name
+                          }
+                        </strong>
 
-                      <span>
-                        {formatPrice(
-                          item.quantity *
-                            item.sale_price
-                        )}
-                      </span>
-                    </div>
+                        <span>
+                          {formatPrice(
+                            item.quantity *
+                              item.sale_price
+                          )}
+                        </span>
+                      </div>
 
-                    <div className="cart-actions">
-                      <input
-                        className="quantity-input"
-                        type="number"
-                        min="0.001"
-                        step="0.001"
-                        value={
-                          item.quantity
-                        }
-                        onChange={(e) =>
-                          changeQuantity(
-                            item.product_id,
-                            Number(
-                              e.target.value
+                      <div className="cart-actions">
+                        <input
+                          className="quantity-input"
+                          type="number"
+                          min="0.001"
+                          step="0.001"
+                          value={
+                            item.quantity
+                          }
+                          onChange={(
+                            e
+                          ) =>
+                            changeQuantity(
+                              item.product_id,
+                              Number(
+                                e.target
+                                  .value
+                              )
                             )
-                          )
-                        }
-                      />
+                          }
+                        />
 
-                      <button
-                        className="btn btn-danger btn-small"
-                        onClick={() =>
-                          removeFromCart(
-                            item.product_id
-                          )
-                        }
-                      >
-                        Rimuovi
-                      </button>
+                        <button
+                          className="btn btn-danger btn-small"
+                          onClick={() =>
+                            removeFromCart(
+                              item.product_id
+                            )
+                          }
+                        >
+                          Rimuovi
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                )}
 
                 <div className="checkout-total">
-                  <span>Totale</span>
+                  <span>
+                    Totale
+                  </span>
 
                   <strong>
-                    {formatPrice(total)}
+                    {formatPrice(
+                      total
+                    )}
                   </strong>
                 </div>
 
                 <label>
-                  Metodo di pagamento
+                  Metodo di
+                  pagamento
                 </label>
 
                 <select
                   className="form-control"
-                  value={paymentMethod}
+                  value={
+                    paymentMethod
+                  }
                   onChange={(e) =>
                     setPaymentMethod(
                       e.target.value
@@ -1571,11 +3525,14 @@ function App() {
 
                 <button
                   className="btn btn-primary btn-full btn-large"
-                  onClick={registerSale}
+                  onClick={
+                    registerSale
+                  }
                 >
                   Registra vendita
                 </button>
               </div>
+
             </div>
           </>
         )}
@@ -1588,10 +3545,12 @@ function App() {
             />
 
             <div className="panel form-panel">
+
               <button
                 className="btn btn-secondary"
                 onClick={() => {
                   clearMessages()
+
                   setShowNewProduct(
                     !showNewProduct
                   )
@@ -1609,13 +3568,19 @@ function App() {
                   </h3>
 
                   <div className="form-grid">
+
                     <FormField label="Nome prodotto">
                       <input
                         className="form-control"
-                        value={newName}
-                        onChange={(e) =>
+                        value={
+                          newName
+                        }
+                        onChange={(
+                          e
+                        ) =>
                           setNewName(
-                            e.target.value
+                            e.target
+                              .value
                           )
                         }
                       />
@@ -1627,9 +3592,12 @@ function App() {
                         value={
                           newSupplier
                         }
-                        onChange={(e) =>
+                        onChange={(
+                          e
+                        ) =>
                           setNewSupplier(
-                            e.target.value
+                            e.target
+                              .value
                           )
                         }
                       />
@@ -1641,9 +3609,12 @@ function App() {
                         value={
                           newCategory
                         }
-                        onChange={(e) =>
+                        onChange={(
+                          e
+                        ) =>
                           setNewCategory(
-                            e.target.value
+                            e.target
+                              .value
                           )
                         }
                       />
@@ -1655,9 +3626,12 @@ function App() {
                         value={
                           newUnitType
                         }
-                        onChange={(e) =>
+                        onChange={(
+                          e
+                        ) =>
                           setNewUnitType(
-                            e.target.value
+                            e.target
+                              .value
                           )
                         }
                       >
@@ -1681,9 +3655,12 @@ function App() {
                         value={
                           newNormalPrice
                         }
-                        onChange={(e) =>
+                        onChange={(
+                          e
+                        ) =>
                           setNewNormalPrice(
-                            e.target.value
+                            e.target
+                              .value
                           )
                         }
                       />
@@ -1695,9 +3672,12 @@ function App() {
                         value={
                           newConfidentialPrice
                         }
-                        onChange={(e) =>
+                        onChange={(
+                          e
+                        ) =>
                           setNewConfidentialPrice(
-                            e.target.value
+                            e.target
+                              .value
                           )
                         }
                       />
@@ -1709,9 +3689,12 @@ function App() {
                         value={
                           newSalePrice
                         }
-                        onChange={(e) =>
+                        onChange={(
+                          e
+                        ) =>
                           setNewSalePrice(
-                            e.target.value
+                            e.target
+                              .value
                           )
                         }
                       />
@@ -1724,13 +3707,17 @@ function App() {
                         value={
                           newExpirationDate
                         }
-                        onChange={(e) =>
+                        onChange={(
+                          e
+                        ) =>
                           setNewExpirationDate(
-                            e.target.value
+                            e.target
+                              .value
                           )
                         }
                       />
                     </FormField>
+
                   </div>
 
                   <button
@@ -1760,7 +3747,11 @@ function App() {
                     setLoadProductId(
                       e.target.value
                     )
-                    setLoadQuantity('')
+
+                    setLoadQuantity(
+                      ''
+                    )
+
                     clearMessages()
                   }}
                 >
@@ -1778,7 +3769,9 @@ function App() {
                           product.product_id
                         }
                       >
-                        {product.name}
+                        {
+                          product.name
+                        }
                       </option>
                     )
                   )}
@@ -1853,7 +3846,9 @@ function App() {
               <FormField label="Note / DDT / riferimento">
                 <textarea
                   className="form-control textarea"
-                  value={loadNotes}
+                  value={
+                    loadNotes
+                  }
                   onChange={(e) =>
                     setLoadNotes(
                       e.target.value
@@ -1864,10 +3859,13 @@ function App() {
 
               <button
                 className="btn btn-primary"
-                onClick={registerLoad}
+                onClick={
+                  registerLoad
+                }
               >
                 Registra carico
               </button>
+
             </div>
           </>
         )}
@@ -1884,8 +3882,12 @@ function App() {
                 <table>
                   <thead>
                     <tr>
-                      <th>Prodotto</th>
-                      <th>Fornitore</th>
+                      <th>
+                        Prodotto
+                      </th>
+                      <th>
+                        Fornitore
+                      </th>
                       <th>
                         Disponibilità
                       </th>
@@ -1920,7 +3922,8 @@ function App() {
                           )
 
                         const rowTotal =
-                          quantity !== null &&
+                          quantity !==
+                            null &&
                           quantity > 0
                             ? quantity *
                               purchasePrice
@@ -1966,17 +3969,21 @@ function App() {
                                 value={
                                   quantityText
                                 }
-                                onChange={(e) =>
+                                onChange={(
+                                  e
+                                ) =>
                                   changeOrderQuantity(
                                     product.product_id,
-                                    e.target.value
+                                    e.target
+                                      .value
                                   )
                                 }
                               />
                             </td>
 
                             <td>
-                              {rowTotal > 0
+                              {rowTotal >
+                              0
                                 ? formatPrice(
                                     rowTotal
                                   )
@@ -1993,7 +4000,8 @@ function App() {
               <div className="order-footer">
                 <div>
                   <span>
-                    Spesa totale prevista
+                    Spesa totale
+                    prevista
                   </span>
 
                   <strong>
@@ -2026,44 +4034,56 @@ function App() {
             <div className="stats-grid">
               <SummaryCard
                 label="Capitale fermo"
-                value={formatPrice(
-                  tiedCapital
-                )}
+                value={
+                  formatPrice(
+                    tiedCapital
+                  )
+                }
               />
 
               <SummaryCard
                 label="Valore potenziale di vendita"
-                value={formatPrice(
-                  inventorySaleValue
-                )}
+                value={
+                  formatPrice(
+                    inventorySaleValue
+                  )
+                }
               />
 
               <SummaryCard
                 label="Margine potenziale"
-                value={formatPrice(
-                  potentialMargin
-                )}
+                value={
+                  formatPrice(
+                    potentialMargin
+                  )
+                }
               />
 
               <SummaryCard
                 label="Ricavi vendite"
-                value={formatPrice(
-                  completedSalesRevenue
-                )}
+                value={
+                  formatPrice(
+                    completedSalesRevenue
+                  )
+                }
               />
 
               <SummaryCard
                 label="Capitale investito storico"
-                value={formatPrice(
-                  purchaseOutflow
-                )}
+                value={
+                  formatPrice(
+                    purchaseOutflow
+                  )
+                }
               />
 
               <SummaryCard
                 label="Cashflow cumulato"
-                value={formatPrice(
-                  netCashflow
-                )}
+                value={
+                  formatPrice(
+                    netCashflow
+                  )
+                }
               />
             </div>
 
@@ -2073,10 +4093,13 @@ function App() {
               </h3>
 
               <p className="chart-description">
-                Parte dal capitale investito
-                nell'inventario iniziale,
-                sottrae i successivi carichi
-                e aggiunge gli incassi delle
+                Parte dal capitale
+                investito
+                nell'inventario
+                iniziale, sottrae i
+                successivi carichi
+                e aggiunge gli
+                incassi delle
                 vendite completate.
               </p>
 
@@ -2089,7 +4112,8 @@ function App() {
           </>
         )}
 
-        {page === 'salesHistory' && (
+        {page ===
+          'salesHistory' && (
           <>
             <PageTitle
               title="Storico vendite"
@@ -2097,103 +4121,116 @@ function App() {
             />
 
             <div className="cards-list">
-              {sales.map((sale) => (
-                <div
-                  key={sale.id}
-                  className="sale-card"
-                >
-                  <div className="sale-card-header">
-                    <div>
-                      <strong>
-                        {formatDate(
-                          sale.created_at
-                        )}
-                      </strong>
+              {sales.map(
+                (sale) => (
+                  <div
+                    key={
+                      sale.id
+                    }
+                    className="sale-card"
+                  >
+                    <div className="sale-card-header">
+                      <div>
+                        <strong>
+                          {formatDate(
+                            sale.created_at
+                          )}
+                        </strong>
 
-                      <span>
-                        {sale.payment_method ??
-                          '-'}
+                        <span>
+                          {sale.payment_method ??
+                            '-'}
+                        </span>
+                      </div>
+
+                      <span
+                        className={
+                          sale.status ===
+                          'ANNULLATA'
+                            ? 'badge badge-danger'
+                            : 'badge badge-success'
+                        }
+                      >
+                        {
+                          sale.status
+                        }
                       </span>
                     </div>
 
-                    <span
-                      className={
-                        sale.status ===
-                        'ANNULLATA'
-                          ? 'badge badge-danger'
-                          : 'badge badge-success'
-                      }
-                    >
-                      {sale.status}
-                    </span>
-                  </div>
+                    <div className="sale-items">
+                      {sale.sale_items?.map(
+                        (
+                          item
+                        ) => (
+                          <div
+                            key={
+                              item.id
+                            }
+                          >
+                            <span>
+                              {getProductName(
+                                item.products
+                              )}
+                              {' × '}
+                              {
+                                item.quantity
+                              }
+                            </span>
 
-                  <div className="sale-items">
-                    {sale.sale_items?.map(
-                      (item) => (
-                        <div
-                          key={
-                            item.id
-                          }
-                        >
-                          <span>
-                            {getProductName(
-                              item.products
-                            )}
-                            {' × '}
-                            {item.quantity}
-                          </span>
+                            <strong>
+                              {formatPrice(
+                                item.line_total
+                              )}
+                            </strong>
+                          </div>
+                        )
+                      )}
+                    </div>
 
-                          <strong>
-                            {formatPrice(
-                              item.line_total
-                            )}
-                          </strong>
-                        </div>
-                      )
+                    <div className="sale-total">
+                      <span>
+                        Totale
+                      </span>
+
+                      <strong>
+                        {formatPrice(
+                          sale.total_amount
+                        )}
+                      </strong>
+                    </div>
+
+                    {sale.status ===
+                      'COMPLETATA' && (
+                      <button
+                        className="btn btn-danger"
+                        onClick={() =>
+                          cancelSale(
+                            sale.id
+                          )
+                        }
+                      >
+                        Annulla vendita
+                      </button>
+                    )}
+
+                    {sale.status ===
+                      'ANNULLATA' && (
+                      <div className="cancel-reason">
+                        Motivo:{' '}
+                        {
+                          sale.cancellation_reason
+                        }
+                      </div>
                     )}
                   </div>
-
-                  <div className="sale-total">
-                    <span>Totale</span>
-
-                    <strong>
-                      {formatPrice(
-                        sale.total_amount
-                      )}
-                    </strong>
-                  </div>
-
-                  {sale.status ===
-                    'COMPLETATA' && (
-                    <button
-                      className="btn btn-danger"
-                      onClick={() =>
-                        cancelSale(
-                          sale.id
-                        )
-                      }
-                    >
-                      Annulla vendita
-                    </button>
-                  )}
-
-                  {sale.status ===
-                    'ANNULLATA' && (
-                    <div className="cancel-reason">
-                      Motivo:{' '}
-                      {
-                        sale.cancellation_reason
-                      }
-                    </div>
-                  )}
-                </div>
-              ))}
+                )
+              )}
             </div>
           </>
         )}
 
-        {page === 'movements' && (
+        {page ===
+          'movements' && (
           <>
             <PageTitle
               title="Storico movimenti"
@@ -2205,19 +4242,35 @@ function App() {
                 <table>
                   <thead>
                     <tr>
-                      <th>Data</th>
-                      <th>Prodotto</th>
-                      <th>Movimento</th>
-                      <th>Quantità</th>
-                      <th>Prima</th>
-                      <th>Dopo</th>
-                      <th>Note</th>
+                      <th>
+                        Data
+                      </th>
+                      <th>
+                        Prodotto
+                      </th>
+                      <th>
+                        Movimento
+                      </th>
+                      <th>
+                        Quantità
+                      </th>
+                      <th>
+                        Prima
+                      </th>
+                      <th>
+                        Dopo
+                      </th>
+                      <th>
+                        Note
+                      </th>
                     </tr>
                   </thead>
 
                   <tbody>
                     {movements.map(
-                      (movement) => (
+                      (
+                        movement
+                      ) => (
                         <tr
                           key={
                             movement.id
@@ -2284,12 +4337,16 @@ function App() {
               subtitle="Prodotti non più disponibili nelle operazioni correnti"
             />
 
-            {inactiveProducts.length === 0 ? (
+            {inactiveProducts.length ===
+            0 ? (
               <div className="panel empty-state">
-                Non ci sono prodotti disattivati.
+                Non ci sono
+                prodotti
+                disattivati.
               </div>
             ) : (
               <div className="inactive-products-grid">
+
                 {inactiveProducts.map(
                   (product) => (
                     <div
@@ -2300,7 +4357,9 @@ function App() {
                     >
                       <div className="inactive-product-header">
                         <h3>
-                          {product.name}
+                          {
+                            product.name
+                          }
                         </h3>
 
                         <span className="badge badge-neutral">
@@ -2309,6 +4368,7 @@ function App() {
                       </div>
 
                       <div className="inactive-product-data">
+
                         <div>
                           <span>
                             Fornitore
@@ -2333,7 +4393,8 @@ function App() {
 
                         <div>
                           <span>
-                            Disponibilità residua
+                            Disponibilità
+                            residua
                           </span>
 
                           <strong>
@@ -2355,6 +4416,7 @@ function App() {
                             )}
                           </strong>
                         </div>
+
                       </div>
 
                       <button
@@ -2370,29 +4432,33 @@ function App() {
                     </div>
                   )
                 )}
+
               </div>
             )}
           </>
         )}
 
         {errorMessage && (
-          <div className="alert alert-error">
+          <div className="alert alert-error no-print">
             {errorMessage}
           </div>
         )}
 
         {successMessage && (
-          <div className="alert alert-success">
+          <div className="alert alert-success no-print">
             {successMessage}
           </div>
         )}
+
       </main>
 
       {selectedProduct && (
         <div
-          className="modal-overlay"
+          className="modal-overlay no-print"
           onMouseDown={() =>
-            setSelectedProduct(null)
+            setSelectedProduct(
+              null
+            )
           }
         >
           <div
@@ -2408,7 +4474,9 @@ function App() {
                 </span>
 
                 <h2>
-                  {selectedProduct.name}
+                  {
+                    selectedProduct.name
+                  }
                 </h2>
               </div>
 
@@ -2427,100 +4495,84 @@ function App() {
             </div>
 
             <div className="product-modal-grid">
-              <div className="product-detail">
-                <span>
-                  Fornitore
-                </span>
 
-                <strong>
-                  {selectedProduct.supplier ??
-                    '-'}
-                </strong>
-              </div>
+              <ProductDetail
+                label="Fornitore"
+                value={
+                  selectedProduct.supplier ??
+                  '-'
+                }
+              />
 
-              <div className="product-detail">
-                <span>
-                  Categoria
-                </span>
+              <ProductDetail
+                label="Categoria"
+                value={
+                  selectedProduct.category ??
+                  '-'
+                }
+              />
 
-                <strong>
-                  {selectedProduct.category ??
-                    '-'}
-                </strong>
-              </div>
-
-              <div className="product-detail">
-                <span>
-                  Disponibilità
-                </span>
-
-                <strong>
-                  {formatQuantity(
+              <ProductDetail
+                label="Disponibilità"
+                value={
+                  formatQuantity(
                     selectedProduct.availability,
                     selectedProduct.unit_type
-                  )}
-                </strong>
-              </div>
+                  )
+                }
+              />
 
-              <div className="product-detail">
-                <span>
-                  Unità di misura
-                </span>
-
-                <strong>
-                  {formatUnit(
+              <ProductDetail
+                label="Unità di misura"
+                value={
+                  formatUnit(
                     selectedProduct.unit_type
-                  )}
-                </strong>
-              </div>
+                  )
+                }
+              />
 
-              <div className="product-detail">
-                <span>
-                  Prezzo normale
-                </span>
-
-                <strong>
-                  {formatPrice(
+              <ProductDetail
+                label="Prezzo normale"
+                value={
+                  formatPrice(
                     selectedProduct.normal_price
-                  )}
-                </strong>
-              </div>
+                  )
+                }
+              />
 
-              <div className="product-detail">
-                <span>
-                  Prezzo confidenziale
-                </span>
-
-                <strong>
-                  {formatPrice(
+              <ProductDetail
+                label="Prezzo confidenziale"
+                value={
+                  formatPrice(
                     selectedProduct.confidential_price
-                  )}
-                </strong>
-              </div>
+                  )
+                }
+              />
 
-              <div className="product-detail">
-                <span>
-                  Prezzo SOMS
-                </span>
-
-                <strong>
-                  {formatPrice(
+              <ProductDetail
+                label="Prezzo SOMS"
+                value={
+                  formatPrice(
                     selectedProduct.sale_price
-                  )}
-                </strong>
-              </div>
+                  )
+                }
+              />
 
               <div className="product-detail">
                 <span>
-                  Giorni alla scadenza
+                  Giorni alla
+                  scadenza
                 </span>
 
                 <ExpirationBadge
-                  days={getDaysToExpiration(
-                    selectedProduct.expiration_date
-                  )}
+                  days={
+                    getDaysToExpiration(
+                      selectedProduct.expiration_date
+                    )
+                  }
                 />
               </div>
+
             </div>
 
             <div className="modal-expiration">
@@ -2551,8 +4603,9 @@ function App() {
                 </strong>
 
                 <p>
-                  Il prodotto verrà nascosto
-                  dalle operazioni correnti,
+                  Il prodotto verrà
+                  nascosto dalle
+                  operazioni correnti,
                   ma vendite e movimenti
                   storici resteranno
                   conservati.
@@ -2573,6 +4626,77 @@ function App() {
           </div>
         </div>
       )}
+
+    </div>
+  )
+}
+
+function DifferenceBadge({
+  difference,
+  unit,
+}: {
+  difference:
+    number | null
+  unit: string
+}) {
+  if (
+    difference === null
+  ) {
+    return (
+      <span className="badge badge-neutral">
+        -
+      </span>
+    )
+  }
+
+  if (
+    difference === 0
+  ) {
+    return (
+      <span className="badge badge-neutral">
+        Nessuna
+      </span>
+    )
+  }
+
+  const sign =
+    difference > 0
+      ? '+'
+      : ''
+
+  return (
+    <span
+      className={
+        difference > 0
+          ? 'badge badge-success'
+          : 'badge badge-danger'
+      }
+    >
+      {sign}
+      {formatQuantity(
+        difference,
+        unit
+      )}
+    </span>
+  )
+}
+
+function ProductDetail({
+  label,
+  value,
+}: {
+  label: string
+  value: string
+}) {
+  return (
+    <div className="product-detail">
+      <span>
+        {label}
+      </span>
+
+      <strong>
+        {value}
+      </strong>
     </div>
   )
 }
@@ -2580,9 +4704,12 @@ function App() {
 function CashflowChart({
   points,
 }: {
-  points: CashflowPoint[]
+  points:
+    CashflowPoint[]
 }) {
-  if (points.length === 0) {
+  if (
+    points.length === 0
+  ) {
     return (
       <div className="empty-state">
         Nessun dato disponibile.
@@ -2594,47 +4721,76 @@ function CashflowChart({
   const height = 360
   const padding = 55
 
-  const values = points.map(
-    (point) => point.value
-  )
+  const values =
+    points.map(
+      (point) =>
+        point.value
+    )
 
-  const min = Math.min(0, ...values)
-  const max = Math.max(0, ...values)
+  const min =
+    Math.min(
+      0,
+      ...values
+    )
+
+  const max =
+    Math.max(
+      0,
+      ...values
+    )
 
   const range =
     max - min === 0
       ? 1
       : max - min
 
-  const x = (index: number) => {
-    if (points.length === 1) {
+  const x = (
+    index: number
+  ) => {
+    if (
+      points.length ===
+      1
+    ) {
       return width / 2
     }
 
     return (
       padding +
       (index /
-        (points.length - 1)) *
-        (width - padding * 2)
+        (points.length -
+          1)) *
+        (width -
+          padding * 2)
     )
   }
 
-  const y = (value: number) =>
+  const y = (
+    value: number
+  ) =>
     height -
     padding -
-    ((value - min) / range) *
-      (height - padding * 2)
+    ((value - min) /
+      range) *
+      (height -
+        padding * 2)
 
-  const polyline = points
-    .map(
-      (point, index) =>
-        `${x(index)},${y(
-          point.value
-        )}`
-    )
-    .join(' ')
+  const polyline =
+    points
+      .map(
+        (
+          point,
+          index
+        ) =>
+          `${x(
+            index
+          )},${y(
+            point.value
+          )}`
+      )
+      .join(' ')
 
-  const zeroY = y(0)
+  const zeroY =
+    y(0)
 
   return (
     <div className="chart-wrapper">
@@ -2645,22 +4801,34 @@ function CashflowChart({
         <line
           x1={padding}
           y1={zeroY}
-          x2={width - padding}
+          x2={
+            width -
+            padding
+          }
           y2={zeroY}
           className="chart-zero-line"
         />
 
         <polyline
-          points={polyline}
+          points={
+            polyline
+          }
           className="chart-line"
         />
 
         {points.map(
-          (point, index) => (
+          (
+            point,
+            index
+          ) => (
             <circle
               key={`${point.date}-${index}`}
-              cx={x(index)}
-              cy={y(point.value)}
+              cx={x(
+                index
+              )}
+              cy={y(
+                point.value
+              )}
               r="5"
               className="chart-dot"
             >
@@ -2682,15 +4850,22 @@ function CashflowChart({
           y={25}
           className="chart-label"
         >
-          {formatPrice(max)}
+          {formatPrice(
+            max
+          )}
         </text>
 
         <text
           x={padding}
-          y={height - 12}
+          y={
+            height -
+            12
+          }
           className="chart-label"
         >
-          {formatPrice(min)}
+          {formatPrice(
+            min
+          )}
         </text>
       </svg>
     </div>
@@ -2700,7 +4875,8 @@ function CashflowChart({
 function ExpirationBadge({
   days,
 }: {
-  days: number | null
+  days:
+    number | null
 }) {
   if (days === null) {
     return (
@@ -2713,7 +4889,11 @@ function ExpirationBadge({
   if (days < 0) {
     return (
       <span className="badge badge-danger">
-        Scaduto da {Math.abs(days)} gg
+        Scaduto da{' '}
+        {Math.abs(
+          days
+        )}{' '}
+        gg
       </span>
     )
   }
@@ -2742,15 +4922,24 @@ function ExpirationBadge({
 }
 
 function getDaysToExpiration(
-  expirationDate: string | null
+  expirationDate:
+    string | null
 ) {
-  if (!expirationDate) {
+  if (
+    !expirationDate
+  ) {
     return null
   }
 
-  const today = new Date()
+  const today =
+    new Date()
 
-  today.setHours(0, 0, 0, 0)
+  today.setHours(
+    0,
+    0,
+    0,
+    0
+  )
 
   const expiration =
     new Date(
@@ -2763,7 +4952,10 @@ function getDaysToExpiration(
 
   return Math.ceil(
     difference /
-      (1000 * 60 * 60 * 24)
+      (1000 *
+        60 *
+        60 *
+        24)
   )
 }
 
@@ -2783,7 +4975,9 @@ function NavButton({
           ? 'nav-button-active'
           : ''
       }`}
-      onClick={onClick}
+      onClick={
+        onClick
+      }
     >
       {label}
     </button>
@@ -2799,8 +4993,13 @@ function PageTitle({
 }) {
   return (
     <div className="page-title">
-      <h2>{title}</h2>
-      <p>{subtitle}</p>
+      <h2>
+        {title}
+      </h2>
+
+      <p>
+        {subtitle}
+      </p>
     </div>
   )
 }
@@ -2810,12 +5009,18 @@ function SummaryCard({
   value,
 }: {
   label: string
-  value: string | number
+  value:
+    string | number
 }) {
   return (
     <div className="summary-card">
-      <span>{label}</span>
-      <strong>{value}</strong>
+      <span>
+        {label}
+      </span>
+
+      <strong>
+        {value}
+      </strong>
     </div>
   )
 }
@@ -2825,11 +5030,15 @@ function FormField({
   children,
 }: {
   label: string
-  children: React.ReactNode
+  children:
+    React.ReactNode
 }) {
   return (
     <label className="form-field">
-      <span>{label}</span>
+      <span>
+        {label}
+      </span>
+
       {children}
     </label>
   )
@@ -2866,25 +5075,39 @@ function MovementBadge({
           : 'badge badge-neutral'
       }
     >
-      {type.replaceAll('_', ' ')}
+      {type.replaceAll(
+        '_',
+        ' '
+      )}
     </span>
   )
 }
 
 function getProductName(
-  products: ProductRelation
+  products:
+    ProductRelation
 ) {
-  if (!products) return '-'
+  if (!products) {
+    return '-'
+  }
 
-  if (Array.isArray(products)) {
-    return products[0]?.name ?? '-'
+  if (
+    Array.isArray(
+      products
+    )
+  ) {
+    return (
+      products[0]
+        ?.name ?? '-'
+    )
   }
 
   return products.name
 }
 
 function formatPrice(
-  value: number | null
+  value:
+    number | null
 ) {
   if (
     value === null ||
@@ -2895,10 +5118,15 @@ function formatPrice(
 
   return `${Number(
     value
-  ).toLocaleString('it-IT', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })} €`
+  ).toLocaleString(
+    'it-IT',
+    {
+      minimumFractionDigits:
+        2,
+      maximumFractionDigits:
+        2,
+    }
+  )} €`
 }
 
 function formatDate(
@@ -2906,13 +5134,33 @@ function formatDate(
 ) {
   return new Date(
     value
-  ).toLocaleString('it-IT')
+  ).toLocaleString(
+    'it-IT'
+  )
 }
 
-function formatUnit(unit: string) {
-  if (unit === 'KG') return 'kg'
+function formatDateOnly(
+  value: string
+) {
+  return new Date(
+    `${value}T00:00:00`
+  ).toLocaleDateString(
+    'it-IT'
+  )
+}
 
-  if (unit === 'LITRO') {
+function formatUnit(
+  unit: string
+) {
+  if (
+    unit === 'KG'
+  ) {
+    return 'kg'
+  }
+
+  if (
+    unit === 'LITRO'
+  ) {
     return 'litri'
   }
 
@@ -2924,10 +5172,13 @@ function formatQuantity(
   unit: string
 ) {
   const formatted =
-    Number(quantity).toLocaleString(
+    Number(
+      quantity
+    ).toLocaleString(
       'it-IT',
       {
-        maximumFractionDigits: 3,
+        maximumFractionDigits:
+          3,
       }
     )
 
