@@ -1,4 +1,5 @@
 import { read, utils, writeFileXLSX } from 'xlsx'
+
 import type {
   ExcelImportRow,
   InventoryRow,
@@ -19,6 +20,10 @@ export const EXCEL_HEADERS = [
   'Scadenza',
 ]
 
+const REQUIRED_EXCEL_HEADERS = EXCEL_HEADERS.filter(
+  (header) => header !== 'ID prodotto'
+)
+
 export function makeDateTimeFileName(prefix: string) {
   const now = new Date()
 
@@ -36,6 +41,30 @@ export function makeDateTimeFileName(prefix: string) {
   return `${prefix}_${date}_${time}.xlsx`
 }
 
+function saveExcel(
+  rows: Record<string, unknown>[],
+  sheetName: string,
+  filenamePrefix: string,
+  widths?: number[]
+) {
+  const worksheet = utils.json_to_sheet(rows)
+
+  if (widths) {
+    worksheet['!cols'] = widths.map((wch) => ({ wch }))
+  }
+
+  const workbook = utils.book_new()
+  utils.book_append_sheet(workbook, worksheet, sheetName)
+
+  const filename = makeDateTimeFileName(filenamePrefix)
+
+  writeFileXLSX(workbook, filename, {
+    compression: true,
+  })
+
+  return filename
+}
+
 export function exportInventoryExcel(inventory: InventoryRow[]) {
   const rows = inventory.map((product) => ({
     'ID prodotto': product.product_id,
@@ -50,28 +79,12 @@ export function exportInventoryExcel(inventory: InventoryRow[]) {
     Scadenza: product.expiration_date ?? '',
   }))
 
-  const worksheet = utils.json_to_sheet(rows)
-
-  worksheet['!cols'] = [
-    { wch: 38 },
-    { wch: 35 },
-    { wch: 28 },
-    { wch: 22 },
-    { wch: 20 },
-    { wch: 24 },
-    { wch: 18 },
-    { wch: 16 },
-    { wch: 14 },
-    { wch: 16 },
-  ]
-
-  const workbook = utils.book_new()
-  utils.book_append_sheet(workbook, worksheet, 'Inventario')
-
-  const filename = makeDateTimeFileName('Inventario')
-  writeFileXLSX(workbook, filename, { compression: true })
-
-  return filename
+  return saveExcel(
+    rows,
+    'Inventario',
+    'Inventario',
+    [38, 35, 28, 22, 20, 24, 18, 16, 14, 16]
+  )
 }
 
 export function exportMovementsExcel(movements: Movement[]) {
@@ -86,33 +99,19 @@ export function exportMovementsExcel(movements: Movement[]) {
     Note: movement.notes ?? '',
   }))
 
-  const worksheet = utils.json_to_sheet(rows)
-
-  worksheet['!cols'] = [
-    { wch: 22 },
-    { wch: 35 },
-    { wch: 25 },
-    { wch: 14 },
-    { wch: 14 },
-    { wch: 14 },
-    { wch: 20 },
-    { wch: 45 },
-  ]
-
-  const workbook = utils.book_new()
-  utils.book_append_sheet(workbook, worksheet, 'Movimenti')
-
-  const filename = makeDateTimeFileName('Movimenti')
-  writeFileXLSX(workbook, filename, { compression: true })
-
-  return filename
+  return saveExcel(
+    rows,
+    'Movimenti',
+    'Movimenti',
+    [22, 35, 25, 14, 14, 14, 20, 45]
+  )
 }
 
 export function exportSalesExcel(sales: Sale[]) {
-  const rows: Record<string, string | number>[] = []
+  const rows: Record<string, unknown>[] = []
 
   for (const sale of sales) {
-    if (!sale.sale_items || sale.sale_items.length === 0) {
+    if (!sale.sale_items?.length) {
       rows.push({
         'ID vendita': sale.id,
         Data: new Date(sale.created_at).toLocaleString('it-IT'),
@@ -125,6 +124,7 @@ export function exportSalesExcel(sales: Sale[]) {
         'Totale vendita (€)': sale.total_amount,
         'Motivo annullamento': sale.cancellation_reason ?? '',
       })
+
       continue
     }
 
@@ -144,41 +144,23 @@ export function exportSalesExcel(sales: Sale[]) {
     }
   }
 
-  const worksheet = utils.json_to_sheet(rows)
-
-  worksheet['!cols'] = [
-    { wch: 38 },
-    { wch: 22 },
-    { wch: 16 },
-    { wch: 16 },
-    { wch: 35 },
-    { wch: 12 },
-    { wch: 20 },
-    { wch: 18 },
-    { wch: 20 },
-    { wch: 40 },
-  ]
-
-  const workbook = utils.book_new()
-  utils.book_append_sheet(workbook, worksheet, 'Storico vendite')
-
-  const filename = makeDateTimeFileName('Storico_Vendite')
-  writeFileXLSX(workbook, filename, { compression: true })
-
-  return filename
+  return saveExcel(
+    rows,
+    'Storico vendite',
+    'Storico_Vendite',
+    [38, 22, 16, 16, 35, 12, 20, 18, 20, 40]
+  )
 }
 
 export async function parseInventoryExcel(
   file: File,
   currentProducts: InventoryRow[]
 ): Promise<ExcelImportRow[]> {
-  const arrayBuffer = await file.arrayBuffer()
-
-  const workbook = read(arrayBuffer, {
+  const workbook = read(await file.arrayBuffer(), {
     cellDates: true,
   })
 
-  if (workbook.SheetNames.length === 0) {
+  if (!workbook.SheetNames.length) {
     throw new Error('Il file Excel non contiene fogli')
   }
 
@@ -190,7 +172,7 @@ export async function parseInventoryExcel(
     raw: true,
   })
 
-  if (matrix.length === 0) {
+  if (!matrix.length) {
     throw new Error('Il file Excel è vuoto')
   }
 
@@ -198,20 +180,23 @@ export async function parseInventoryExcel(
     String(value).trim()
   )
 
-  const missingHeaders = EXCEL_HEADERS.filter(
+  const missingHeaders = REQUIRED_EXCEL_HEADERS.filter(
     (header) => !headers.includes(header)
   )
 
-  if (missingHeaders.length > 0) {
+  if (missingHeaders.length) {
     throw new Error(
       `Formato Excel non valido. Colonne mancanti: ${missingHeaders.join(', ')}`
     )
   }
 
-  const objects = utils.sheet_to_json<Record<string, unknown>>(worksheet, {
-    defval: '',
-    raw: true,
-  })
+  const objects = utils.sheet_to_json<Record<string, unknown>>(
+    worksheet,
+    {
+      defval: '',
+      raw: true,
+    }
+  )
 
   const parsedRows: ExcelImportRow[] = []
 
@@ -224,22 +209,34 @@ export async function parseInventoryExcel(
 
     const name = String(row['Prodotto'] ?? '').trim()
 
-    if (name === '' && productIdValue === '') {
+    if (!name && !productIdValue) {
       return
     }
 
-    if (name === '') {
-      throw new Error(`Riga ${excelRowNumber}: prodotto mancante`)
+    if (!name) {
+      throw new Error(
+        `Riga ${excelRowNumber}: prodotto mancante`
+      )
     }
 
-    const supplier = String(row['Fornitore'] ?? '').trim()
+    const supplier = String(
+      row['Fornitore'] ?? ''
+    ).trim()
+
+    const category = String(
+      row['Tipologia'] ?? ''
+    ).trim()
+
     if (!supplier) {
-      throw new Error(`Riga ${excelRowNumber}: fornitore mancante`)
+      throw new Error(
+        `Riga ${excelRowNumber}: fornitore mancante`
+      )
     }
 
-    const category = String(row['Tipologia'] ?? '').trim()
     if (!category) {
-      throw new Error(`Riga ${excelRowNumber}: tipologia mancante`)
+      throw new Error(
+        `Riga ${excelRowNumber}: tipologia mancante`
+      )
     }
 
     const availability = parseExcelNumber(
@@ -256,6 +253,18 @@ export async function parseInventoryExcel(
     const unitType = normalizeUnit(row['Unità'])
     const expirationDate = parseExcelDate(row['Scadenza'])
 
+    const normalPrice = parseExcelNumber(
+      row['Prezzo normale (€)']
+    )
+
+    const confidentialPrice = parseExcelNumber(
+      row['Prezzo confidenziale (€)']
+    )
+
+    const salePrice = parseExcelNumber(
+      row['Prezzo SOMS (€)']
+    )
+
     let existing: InventoryRow | undefined
 
     if (productIdValue) {
@@ -271,23 +280,14 @@ export async function parseInventoryExcel(
     } else {
       existing = currentProducts.find(
         (product) =>
-          product.name.trim().toLowerCase() === name.toLowerCase() &&
-          (product.supplier ?? '').trim().toLowerCase() ===
-            supplier.toLowerCase()
+          normalizeText(product.name) === normalizeText(name) &&
+          normalizeText(product.supplier ?? '') ===
+            normalizeText(supplier)
       )
     }
 
-    const normalPrice = parseExcelNumber(
-      row['Prezzo normale (€)']
-    )
-    const confidentialPrice = parseExcelNumber(
-      row['Prezzo confidenziale (€)']
-    )
-    const salePrice = parseExcelNumber(row['Prezzo SOMS (€)'])
-
-    const currentAvailability = existing
-      ? existing.availability
-      : null
+    const currentAvailability =
+      existing?.availability ?? null
 
     const difference =
       currentAvailability === null
@@ -309,36 +309,54 @@ export async function parseInventoryExcel(
       : ['Nuovo prodotto']
 
     parsedRows.push({
-      product_id: productIdValue || existing?.product_id || null,
+      product_id:
+        productIdValue ||
+        existing?.product_id ||
+        null,
+
       name,
       supplier,
       category,
+
       normal_price: normalPrice,
       confidential_price: confidentialPrice,
       sale_price: salePrice,
+
       availability,
       unit_type: unitType,
       expiration_date: expirationDate,
+
       currentAvailability,
       difference,
+
       action: existing ? 'AGGIORNA' : 'NUOVO',
       changes,
     })
   })
 
-  if (parsedRows.length === 0) {
-    throw new Error('Il file non contiene prodotti da importare')
+  if (!parsedRows.length) {
+    throw new Error(
+      'Il file non contiene prodotti da importare'
+    )
   }
 
-  const ids = parsedRows
-    .map((row) => row.product_id)
-    .filter((id): id is string => Boolean(id))
-
-  if (new Set(ids).size !== ids.length) {
-    throw new Error('Il file contiene prodotti duplicati')
-  }
+  checkDuplicates(parsedRows)
 
   return parsedRows
+}
+
+function checkDuplicates(rows: ExcelImportRow[]) {
+  const keys = rows.map((row) =>
+    row.product_id
+      ? `id:${row.product_id}`
+      : `name:${normalizeText(row.name)}|supplier:${normalizeText(row.supplier)}`
+  )
+
+  if (new Set(keys).size !== keys.length) {
+    throw new Error(
+      'Il file contiene prodotti duplicati'
+    )
+  }
 }
 
 function buildChanges(
@@ -358,7 +376,9 @@ function buildChanges(
   const changes: string[] = []
 
   if (current.name !== next.name) {
-    changes.push(`Nome: "${current.name}" → "${next.name}"`)
+    changes.push(
+      `Nome: "${current.name}" → "${next.name}"`
+    )
   }
 
   if ((current.supplier ?? '') !== next.supplier) {
@@ -373,28 +393,26 @@ function buildChanges(
     )
   }
 
-  if (!sameNumber(current.normal_price, next.normal_price)) {
-    changes.push(
-      `Prezzo normale: ${formatNumber(current.normal_price)} → ${formatNumber(next.normal_price)}`
-    )
-  }
+  addNumberChange(
+    changes,
+    'Prezzo normale',
+    current.normal_price,
+    next.normal_price
+  )
 
-  if (
-    !sameNumber(
-      current.confidential_price,
-      next.confidential_price
-    )
-  ) {
-    changes.push(
-      `Prezzo confidenziale: ${formatNumber(current.confidential_price)} → ${formatNumber(next.confidential_price)}`
-    )
-  }
+  addNumberChange(
+    changes,
+    'Prezzo confidenziale',
+    current.confidential_price,
+    next.confidential_price
+  )
 
-  if (!sameNumber(current.sale_price, next.sale_price)) {
-    changes.push(
-      `Prezzo SOMS: ${formatNumber(current.sale_price)} → ${formatNumber(next.sale_price)}`
-    )
-  }
+  addNumberChange(
+    changes,
+    'Prezzo SOMS',
+    current.sale_price,
+    next.sale_price
+  )
 
   if (current.availability !== next.availability) {
     changes.push(
@@ -403,10 +421,15 @@ function buildChanges(
   }
 
   if (current.unit_type !== next.unit_type) {
-    changes.push(`Unità: ${current.unit_type} → ${next.unit_type}`)
+    changes.push(
+      `Unità: ${current.unit_type} → ${next.unit_type}`
+    )
   }
 
-  if ((current.expiration_date ?? '') !== (next.expiration_date ?? '')) {
+  if (
+    (current.expiration_date ?? '') !==
+    (next.expiration_date ?? '')
+  ) {
     changes.push(
       `Scadenza: ${current.expiration_date ?? '-'} → ${next.expiration_date ?? '-'}`
     )
@@ -415,62 +438,102 @@ function buildChanges(
   return changes
 }
 
+function addNumberChange(
+  changes: string[],
+  label: string,
+  current: number | null,
+  next: number | null
+) {
+  if (!sameNumber(current, next)) {
+    changes.push(
+      `${label}: ${formatNumber(current)} → ${formatNumber(next)}`
+    )
+  }
+}
+
 function parseExcelNumber(
   value: unknown,
   required = false
 ): number | null {
-  if (value === null || value === undefined || value === '') {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ''
+  ) {
     if (required) {
-      throw new Error('Valore numerico mancante')
+      throw new Error(
+        'Valore numerico mancante'
+      )
     }
 
     return null
   }
 
-  if (typeof value === 'number') {
-    if (Number.isNaN(value)) {
-      throw new Error('Numero non valido')
-    }
-
-    return value
-  }
-
-  const parsed = Number(String(value).trim().replace(',', '.'))
+  const parsed =
+    typeof value === 'number'
+      ? value
+      : Number(
+          String(value)
+            .trim()
+            .replace(',', '.')
+        )
 
   if (Number.isNaN(parsed)) {
-    throw new Error(`Numero non valido: ${String(value)}`)
+    throw new Error(
+      `Numero non valido: ${String(value)}`
+    )
   }
 
   return parsed
 }
 
 function normalizeUnit(value: unknown) {
-  const normalized = String(value ?? '').trim().toUpperCase()
+  const unit = normalizeText(value).toUpperCase()
 
-  if (['PEZZO', 'PEZZI', 'PZ'].includes(normalized)) {
+  if (
+    ['PEZZO', 'PEZZI', 'PZ'].includes(unit)
+  ) {
     return 'PEZZO'
   }
 
-  if (['KG', 'KILO', 'CHILO', 'CHILI'].includes(normalized)) {
+  if (
+    ['KG', 'KILO', 'CHILO', 'CHILI'].includes(unit)
+  ) {
     return 'KG'
   }
 
-  if (['LITRO', 'LITRI', 'L'].includes(normalized)) {
+  if (
+    ['LITRO', 'LITRI', 'L'].includes(unit)
+  ) {
     return 'LITRO'
   }
 
-  throw new Error(`Unità non valida: ${String(value)}`)
+  throw new Error(
+    `Unità non valida: ${String(value)}`
+  )
 }
 
-function parseExcelDate(value: unknown): string | null {
-  if (value === null || value === undefined || value === '') {
+function parseExcelDate(
+  value: unknown
+): string | null {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ''
+  ) {
     return null
   }
 
   if (value instanceof Date) {
     const year = value.getFullYear()
-    const month = String(value.getMonth() + 1).padStart(2, '0')
-    const day = String(value.getDate()).padStart(2, '0')
+    const month = String(
+      value.getMonth() + 1
+    ).padStart(2, '0')
+
+    const day = String(
+      value.getDate()
+    ).padStart(2, '0')
+
     return `${year}-${month}-${day}`
   }
 
@@ -487,25 +550,44 @@ function parseExcelDate(value: unknown): string | null {
   if (italian) {
     const day = italian[1].padStart(2, '0')
     const month = italian[2].padStart(2, '0')
+
     return `${italian[3]}-${month}-${day}`
   }
 
-  throw new Error(`Data non valida: ${text}`)
+  throw new Error(
+    `Data non valida: ${text}`
+  )
+}
+
+function normalizeText(value: unknown) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
 }
 
 function sameNumber(
   left: number | null,
   right: number | null
 ) {
-  if (left === null && right === null) return true
-  if (left === null || right === null) return false
+  if (left === null && right === null) {
+    return true
+  }
 
-  return Math.abs(Number(left) - Number(right)) < 0.000001
+  if (left === null || right === null) {
+    return false
+  }
+
+  return Math.abs(left - right) < 0.000001
 }
 
-function formatNumber(value: number | null) {
-  if (value === null) return '-'
-  return Number(value).toLocaleString('it-IT', {
+function formatNumber(
+  value: number | null
+) {
+  if (value === null) {
+    return '-'
+  }
+
+  return value.toLocaleString('it-IT', {
     maximumFractionDigits: 3,
   })
 }
@@ -516,7 +598,13 @@ function getProductName(
     | { name: string }[]
     | null
 ) {
-  if (!products) return '-'
-  if (Array.isArray(products)) return products[0]?.name ?? '-'
+  if (!products) {
+    return '-'
+  }
+
+  if (Array.isArray(products)) {
+    return products[0]?.name ?? '-'
+  }
+
   return products.name
 }

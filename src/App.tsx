@@ -913,25 +913,15 @@ function App() {
     }
 
     if (importMode === 'replace') {
-      const firstConfirm =
-        window.confirm(
-          `ATTENZIONE\n\nStai per sostituire l'inventario corrente con "${excelFileName}".\n\n` +
-            `${productsToDeactivate.length} prodotti attualmente attivi e assenti dal file verranno azzerati e disattivati.\n` +
-            `Lo storico vendite e movimenti verrà conservato.\n\nVuoi continuare?`
-        )
-
-      if (!firstConfirm) return
-
-      const typed = window.prompt(
-        'Per confermare la sostituzione scrivi esattamente: SOSTITUISCI'
+      const confirmed = window.confirm(
+        `ATTENZIONE\n\n` +
+          `Stai per sostituire l'inventario corrente con "${excelFileName}".\n\n` +
+          `${productsToDeactivate.length} prodotti attualmente attivi e assenti dal file verranno azzerati e disattivati.\n\n` +
+          `Lo storico vendite e movimenti verrà conservato.\n\n` +
+          `Confermi la sostituzione del database?`
       )
 
-      if (typed !== 'SOSTITUISCI') {
-        setErrorMessage(
-          'Sostituzione annullata: conferma non valida'
-        )
-        return
-      }
+      if (!confirmed) return
     } else {
       if (
         !window.confirm(
@@ -1460,8 +1450,10 @@ function App() {
                     onChange={async (
                       e
                     ) => {
-                      const file =
-                        e.target.files?.[0]
+                      const input = e.currentTarget
+                      const file = input.files?.[0]
+
+                      input.value = ''
 
                       if (file) {
                         await handleExcelUpload(
@@ -1469,9 +1461,6 @@ function App() {
                           'update'
                         )
                       }
-
-                      e.currentTarget.value =
-                        ''
                     }}
                   />
                 </label>
@@ -1486,8 +1475,10 @@ function App() {
                     onChange={async (
                       e
                     ) => {
-                      const file =
-                        e.target.files?.[0]
+                      const input = e.currentTarget
+                      const file = input.files?.[0]
+
+                      input.value = ''
 
                       if (file) {
                         await handleExcelUpload(
@@ -1495,9 +1486,6 @@ function App() {
                           'replace'
                         )
                       }
-
-                      e.currentTarget.value =
-                        ''
                     }}
                   />
                 </label>
