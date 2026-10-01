@@ -309,6 +309,7 @@ export async function parseInventoryExcel(
       : ['Nuovo prodotto']
 
     parsedRows.push({
+      excelRowNumber,
       product_id:
         productIdValue ||
         existing?.product_id ||

@@ -706,7 +706,11 @@ function App() {
                 return;
         }
         else {
-            if (!window.confirm(`Confermi l'aggiornamento di ${excelRows.length} righe?`)) {
+            if (
+                !window.confirm(
+                    `Il file contiene ${excelRows.length} righe. Confermi l'aggiornamento?`
+                )
+            ) {
                 return;
             }
         }
@@ -1616,7 +1620,7 @@ function ImportPreview({ mode, fileName, rows, changedRows, productsToDeactivate
                     row.name}-${index}`}>
                   <div className="change-card-title">
                     <strong>
-                      {row.name}
+                      Riga {row.excelRowNumber} · {row.name}
                     </strong>
 
                     <span className={row.action ===
