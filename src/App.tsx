@@ -1105,6 +1105,10 @@ function App() {
                         Carta
                       </option>
 
+                      <option value="SATISPAY">
+                        Satispay
+                      </option>
+
                       <option value="ALTRO">
                         Altro
                       </option>
