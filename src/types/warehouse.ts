@@ -89,4 +89,5 @@ export type ExcelImportRow = {
   difference: number | null
   action: 'NUOVO' | 'AGGIORNA'
   changes: string[]
+  excelRowNumber: number
 }
