@@ -4,7 +4,7 @@ import { supabase } from './lib/supabase';
 import { exportInventoryExcel, exportMovementsExcel, exportSalesExcel, makeDateTimeFileName, parseInventoryExcel, } from './utils/excel';
 import type { CartItem, CashflowPoint, ExcelImportRow, ImportMode, InventoryRow, Movement, OrderItem, Page, ProductRelation, Sale, } from './types/warehouse';
 import './App.css';
-type SalePriceType = 'SOMS' | 'NORMAL' | 'CONFIDENTIAL' | 'EVENTO';
+type SalePriceType = 'SOMS' | 'NORMAL' | 'CONFIDENTIAL' | 'COSTO' | 'EVENTO';
 type AppMovement = Movement & {
     product_id: string;
 };
@@ -32,6 +32,8 @@ function getPurchasePrice(product: InventoryRow) {
 function getSalePrice(product: InventoryRow, priceType: SalePriceType): number | null {
     if (priceType === 'EVENTO')
         return 0;
+    if (priceType === 'COSTO')
+        return product.normal_price === null ? null : Number(product.normal_price);
     const value = priceType === 'NORMAL'
         ? product.normal_price
         : priceType === 'CONFIDENTIAL'
@@ -386,10 +388,13 @@ function App() {
             product_id: item.product_id,
             quantity: item.quantity,
         }));
-        if (salePriceType === 'EVENTO') {
+        if (salePriceType === 'EVENTO' || salePriceType === 'COSTO') {
+            const isCostOutflow = salePriceType === 'COSTO';
             const { error } = await supabase.rpc('register_event_outflow', {
                 p_items: items,
-                p_notes: 'Scarico per evento',
+                p_notes: isCostOutflow
+                    ? 'Scarico a prezzo di costo'
+                    : 'Scarico per evento',
             });
             if (error) {
                 setErrorMessage(error.message);
@@ -397,7 +402,9 @@ function App() {
             }
             setCart([]);
             await refreshAll();
-            setSuccessMessage('Scarico per evento registrato correttamente');
+            setSuccessMessage(isCostOutflow
+                ? 'Scarico a prezzo di costo registrato correttamente'
+                : 'Scarico per evento registrato correttamente');
             return;
         }
         const { error } = await supabase.rpc('register_sale', {
@@ -1051,6 +1058,10 @@ function App() {
                     Prezzo confidenziale
                   </option>
 
+                  <option value="COSTO">
+                    Prezzo di costo - Scarico
+                  </option>
+
                   <option value="EVENTO">
                     Costo 0 - Scarico per evento
                   </option>
@@ -1091,7 +1102,7 @@ function App() {
                   </strong>
                 </div>
 
-                {salePriceType !== 'EVENTO' && (<>
+                {salePriceType !== 'EVENTO' && salePriceType !== 'COSTO' && (<>
                     <label>
                       Metodo di pagamento
                     </label>
@@ -1118,7 +1129,9 @@ function App() {
                 <button className="btn btn-primary btn-full btn-large" onClick={registerSale}>
                   {salePriceType === 'EVENTO'
                 ? 'Registra scarico per evento'
-                : 'Registra vendita'}
+                : salePriceType === 'COSTO'
+                    ? 'Registra scarico a prezzo di costo'
+                    : 'Registra vendita'}
                 </button>
               </div>
             </div>
